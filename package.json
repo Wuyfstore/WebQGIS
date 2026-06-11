@@ -1,0 +1,24 @@
+{
+  "name": "webqgis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QGIS-like WebGIS MVP for PostGIS browsing, editing and vector tile publishing.",
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:*",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "build": "npm --workspaces run build",
+    "typecheck": "npm --workspaces run typecheck"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "devDependencies": {
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
