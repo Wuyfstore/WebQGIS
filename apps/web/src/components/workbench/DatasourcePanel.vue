@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, shallowRef } from "vue";
+import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import { Connection, FolderOpened, Plus, Refresh, Setting } from "@element-plus/icons-vue";
 import type { Datasource, DatasourceForm } from "../../types/gis";
 
 const props = defineProps<{
   datasources: Datasource[];
   busy: boolean;
+  connectionDialogRequestKey: number;
 }>();
 
 const form = defineModel<DatasourceForm>("form", { required: true });
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   scan: [datasourceId: string];
 }>();
 
+const isPostgresExpanded = shallowRef(true);
 const isConnectionDialogOpen = shallowRef(false);
 const contextMenu = shallowRef({
   visible: false,
@@ -26,6 +28,7 @@ const contextMenuStyle = computed(() => ({
   top: `${contextMenu.value.y}px`
 }));
 const datasourceCountLabel = computed(() => `${props.datasources.length} 个连接`);
+const postgresDisclosure = computed(() => (isPostgresExpanded.value ? "▾" : "▸"));
 
 function openContextMenu(event: MouseEvent) {
   event.preventDefault();
@@ -49,6 +52,10 @@ function openConnectionDialog() {
   isConnectionDialogOpen.value = true;
 }
 
+function togglePostgresNode() {
+  isPostgresExpanded.value = !isPostgresExpanded.value;
+}
+
 function closeConnectionDialog() {
   isConnectionDialogOpen.value = false;
 }
@@ -67,6 +74,11 @@ function refreshFirstDatasource() {
 onBeforeUnmount(() => {
   window.removeEventListener("click", closeContextMenu);
 });
+
+watch(
+  () => props.connectionDialogRequestKey,
+  () => openConnectionDialog()
+);
 </script>
 
 <template>
@@ -85,29 +97,31 @@ onBeforeUnmount(() => {
       <button
         class="datasource-panel__tree-node datasource-panel__tree-node--root focus-ring"
         type="button"
-        title="右键新建 PostGIS 连接"
+        :title="isPostgresExpanded ? '折叠 PostgreSQL 连接' : '展开 PostgreSQL 连接'"
         @contextmenu="openContextMenu"
-        @click="openConnectionDialog"
+        @click="togglePostgresNode"
       >
         <FolderOpened class="datasource-panel__node-icon" />
-        <span>▾ PostgreSQL</span>
+        <span>{{ postgresDisclosure }} PostgreSQL</span>
         <span class="datasource-panel__root-meta">{{ datasourceCountLabel }}</span>
       </button>
-      <button
-        v-for="datasource in datasources"
-        :key="datasource.id"
-        class="datasource-panel__tree-node datasource-panel__tree-node--source focus-ring"
-        :disabled="busy"
-        type="button"
-        @click="emit('scan', datasource.id)"
-      >
-        <Connection class="datasource-panel__node-icon" />
-        <span class="datasource-panel__source-name">▾ {{ datasource.name }}</span>
-        <span class="datasource-panel__source-meta">{{ datasource.host }} / {{ datasource.database }}</span>
-      </button>
-      <div v-if="datasources.length === 0" class="datasource-panel__tree-empty">
-        暂无连接。右键 PostgreSQL 新建 PostGIS 连接。
-      </div>
+      <template v-if="isPostgresExpanded">
+        <button
+          v-for="datasource in datasources"
+          :key="datasource.id"
+          class="datasource-panel__tree-node datasource-panel__tree-node--source focus-ring"
+          :disabled="busy"
+          type="button"
+          @click="emit('scan', datasource.id)"
+        >
+          <Connection class="datasource-panel__node-icon" />
+          <span class="datasource-panel__source-name">▾ {{ datasource.name }}</span>
+          <span class="datasource-panel__source-meta">{{ datasource.host }} / {{ datasource.database }}</span>
+        </button>
+        <div v-if="datasources.length === 0" class="datasource-panel__tree-empty">
+          暂无连接。右键 PostgreSQL 新建 PostGIS 连接。
+        </div>
+      </template>
     </div>
 
     <Teleport to="body">

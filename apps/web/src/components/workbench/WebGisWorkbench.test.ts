@@ -65,15 +65,42 @@ describe("WebGisWorkbench", () => {
     document.body.innerHTML = "";
   });
 
-  it("opens the PostGIS connection dialog when clicking the PostgreSQL browser node", async () => {
+  it("toggles the PostgreSQL browser node when clicking it", async () => {
     const wrapper = mount(WebGisWorkbench, {
       attachTo: document.body
     });
 
+    expect(wrapper.text()).toContain("暂无连接。右键 PostgreSQL 新建 PostGIS 连接。");
     await wrapper.find(".datasource-panel__tree-node--root").trigger("click");
 
+    expect(document.body.textContent).not.toContain("创建新的 PostGIS 连接");
+    expect(wrapper.text()).not.toContain("暂无连接。右键 PostgreSQL 新建 PostGIS 连接。");
+
+    await wrapper.find(".datasource-panel__tree-node--root").trigger("click");
+    expect(wrapper.text()).toContain("暂无连接。右键 PostgreSQL 新建 PostGIS 连接。");
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
+  });
+
+  it("opens the PostGIS connection dialog from the database menu command", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".workbench__menu-item")
+      .find((item) => item.text() === "数据库")
+      ?.trigger("click");
+
+    const command = wrapper.findAll(".workbench__menu-command")
+      .find((item) => item.text() === "新建 PostgreSQL 连接...");
+    expect(command?.exists()).toBe(true);
+
+    await command?.trigger("click");
+
     expect(document.body.textContent).toContain("创建新的 PostGIS 连接");
-    expect(document.body.textContent).toContain("名称");
+    expect(document.body.textContent).toContain("保存并测试");
 
     wrapper.unmount();
     document.body.innerHTML = "";

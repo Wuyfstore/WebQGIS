@@ -27,6 +27,8 @@ import { getGeometryModes } from "../../utils/layer";
 
 const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
+const openMenuLabel = shallowRef<string | null>(null);
+const datasourceDialogRequestKey = shallowRef(0);
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -75,17 +77,74 @@ const activeLayerLabel = computed(() => (
 const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
 const menuItems = [
-  { label: "项目", status: "项目菜单已聚焦：当前版本支持新建草稿、保存和刷新工作区" },
-  { label: "编辑", status: "编辑菜单已聚焦：可使用选择、绘制、节点编辑和删除工具" },
-  { label: "视图", status: "视图菜单已聚焦：可使用平移、缩放和图层可见性" },
-  { label: "图层", status: "图层菜单已聚焦：可选择图层、切换显示并编辑样式" },
-  { label: "设置", status: "设置菜单已聚焦：PostGIS 连接参数在浏览器面板中维护" },
-  { label: "插件", status: "插件菜单已聚焦：插件系统尚未启用" },
-  { label: "矢量", status: "矢量菜单已聚焦：当前版本通过 PostGIS 图层直接编辑矢量要素" },
-  { label: "数据库", status: "数据库菜单已聚焦：右键 PostgreSQL 可新建 PostGIS 连接" },
-  { label: "网络", status: "网络菜单已聚焦：当前地图浏览链路使用 MVT" },
-  { label: "帮助", status: "帮助菜单已聚焦：底部状态栏会显示当前工具反馈" }
-];
+  "项目",
+  "编辑",
+  "视图",
+  "图层",
+  "设置",
+  "插件",
+  "矢量",
+  "数据库",
+  "网络",
+  "帮助"
+] as const;
+
+type MenuLabel = typeof menuItems[number];
+
+type MenuCommand = {
+  label: string;
+  action: () => void | Promise<void>;
+  disabled?: boolean;
+};
+
+const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
+  项目: [
+    { label: "新建编辑草稿", action: handleNewDraft, disabled: busy.value },
+    { label: "保存当前编辑", action: handleSaveFeature, disabled: busy.value || !hasDraftGeometry.value },
+    { label: "刷新工作区", action: handleRefreshAll, disabled: busy.value }
+  ],
+  编辑: [
+    { label: "选择要素", action: () => editor.activateTool("select"), disabled: busy.value },
+    { label: "撤销当前草稿", action: handleClearDraft, disabled: busy.value || (!hasDraftGeometry.value && !hasSelectedFeature.value) },
+    { label: "节点编辑", action: () => editor.activateTool("node"), disabled: busy.value },
+    { label: "删除选中要素", action: handleDeleteFeature, disabled: busy.value || !hasSelectedFeature.value }
+  ],
+  视图: [
+    { label: "平移地图", action: () => editor.activateTool("pan"), disabled: busy.value },
+    { label: "放大地图", action: () => editor.activateTool("zoom"), disabled: busy.value },
+    { label: "刷新当前图层", action: handleRefreshAll, disabled: busy.value }
+  ],
+  图层: [
+    { label: "刷新图层列表", action: handleRefreshAll, disabled: busy.value },
+    { label: "校验当前图层", action: validateActiveLayer, disabled: busy.value },
+    { label: "切换当前图层可见性", action: toggleActiveLayerVisibility, disabled: busy.value || !activeLayer.value }
+  ],
+  设置: [
+    { label: "切换吸附", action: editor.toggleSnap, disabled: busy.value },
+    { label: "校验编辑状态", action: validateActiveLayer, disabled: busy.value }
+  ],
+  插件: [
+    { label: "插件系统尚未纳入 V1", action: () => workspace.setStatus("插件系统不在 V1 范围内", "warning"), disabled: false }
+  ],
+  矢量: [
+    { label: "绘制点", action: () => editor.startDrawing("Point"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point") },
+    { label: "绘制线", action: () => editor.startDrawing("LineString"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString") },
+    { label: "绘制面", action: () => editor.startDrawing("Polygon"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon") }
+  ],
+  数据库: [
+    { label: "新建 PostgreSQL 连接...", action: requestDatasourceConnectionDialog, disabled: busy.value },
+    { label: "刷新数据源", action: handleRefreshAll, disabled: busy.value },
+    { label: "扫描第一个数据源", action: scanFirstDatasource, disabled: busy.value || datasources.value.length === 0 }
+  ],
+  网络: [
+    { label: "刷新 MVT 图层", action: handleRefreshAll, disabled: busy.value },
+    { label: "显示链路说明", action: () => workspace.setStatus("显示链路使用 MVT，编辑链路回源读取原始 PostGIS geometry", "neutral") }
+  ],
+  帮助: [
+    { label: "显示 V1 范围", action: () => workspace.setStatus("V1 聚焦连接 PostGIS、扫描图层、浏览地图、编辑要素并写回数据库", "neutral") },
+    { label: "显示当前状态", action: () => workspace.setStatus(status.value.text, status.value.tone) }
+  ]
+}));
 
 type ToolbarItem = {
   label: string;
@@ -221,8 +280,16 @@ function handleMapReady(element: HTMLDivElement) {
   editor.initializeMap();
 }
 
-function handleMenuAction(statusText: string) {
-  workspace.setStatus(statusText, "neutral");
+function toggleMenu(label: MenuLabel) {
+  openMenuLabel.value = openMenuLabel.value === label ? null : label;
+}
+
+async function runMenuCommand(command: MenuCommand) {
+  if (command.disabled) {
+    return;
+  }
+  openMenuLabel.value = null;
+  await command.action();
 }
 
 function handleNewDraft() {
@@ -260,6 +327,30 @@ async function handleRefreshAll() {
   editor.refreshLayer(activeLayer.value?.id);
 }
 
+function requestDatasourceConnectionDialog() {
+  datasourceDialogRequestKey.value += 1;
+  workspace.setStatus("打开 PostGIS 连接窗口", "neutral");
+}
+
+async function scanFirstDatasource() {
+  const datasource = datasources.value[0];
+  if (!datasource) {
+    workspace.setStatus("暂无可扫描的数据源", "warning");
+    return;
+  }
+  await workspace.scanDatasource(datasource.id);
+}
+
+function toggleActiveLayerVisibility() {
+  const layer = activeLayer.value;
+  if (!layer) {
+    workspace.setStatus("请先选择一个图层", "warning");
+    return;
+  }
+  workspace.toggleLayer(layer.id);
+  workspace.setStatus(`已切换图层可见性：${layer.schema}.${layer.table}`, "success");
+}
+
 function validateActiveLayer() {
   const layer = activeLayer.value;
   if (!layer) {
@@ -279,15 +370,30 @@ function validateActiveLayer() {
     <header class="workbench__menubar">
       <strong class="workbench__brand">WebQGIS</strong>
       <nav class="workbench__menu" aria-label="应用菜单">
-        <button
-          v-for="item in menuItems"
-          :key="item.label"
-          class="workbench__menu-item focus-ring"
-          type="button"
-          @click="handleMenuAction(item.status)"
-        >
-          {{ item.label }}
-        </button>
+        <div v-for="item in menuItems" :key="item" class="workbench__menu-group">
+          <button
+            class="workbench__menu-item focus-ring"
+            :class="{ 'workbench__menu-item--open': openMenuLabel === item }"
+            type="button"
+            :aria-expanded="openMenuLabel === item"
+            @click="toggleMenu(item)"
+          >
+            {{ item }}
+          </button>
+          <div v-if="openMenuLabel === item" class="workbench__menu-popover" role="menu">
+            <button
+              v-for="command in menuCommands[item]"
+              :key="command.label"
+              class="workbench__menu-command focus-ring"
+              :disabled="command.disabled"
+              type="button"
+              role="menuitem"
+              @click="runMenuCommand(command)"
+            >
+              {{ command.label }}
+            </button>
+          </div>
+        </div>
       </nav>
       <span class="workbench__connection">PostgreSQL: Local PostGIS / public</span>
     </header>
@@ -330,6 +436,7 @@ function validateActiveLayer() {
           :datasources="datasources"
           v-model:form="datasourceForm"
           :busy="busy"
+          :connection-dialog-request-key="datasourceDialogRequestKey"
           @save="workspace.saveDatasource"
           @scan="workspace.scanDatasource"
         />
@@ -432,6 +539,12 @@ function validateActiveLayer() {
   height: 100%;
 }
 
+.workbench__menu-group {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
 .workbench__menu-item {
   border: 0;
   background: transparent;
@@ -442,6 +555,42 @@ function validateActiveLayer() {
 
 .workbench__menu-item:hover {
   background: #dcdcdc;
+}
+
+.workbench__menu-item--open {
+  background: #dcdcdc;
+}
+
+.workbench__menu-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 180px;
+  border: 1px solid #8d8d8d;
+  background: #f7f7f7;
+  box-shadow: 2px 4px 12px rgba(15, 23, 42, 0.24);
+  padding: 4px;
+}
+
+.workbench__menu-command {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 4px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.workbench__menu-command:hover:not(:disabled) {
+  background: var(--qgis-row-active);
+}
+
+.workbench__menu-command:disabled {
+  color: var(--qgis-muted);
 }
 
 .workbench__connection {
