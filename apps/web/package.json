@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc -b --noEmit"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vueuse/core": "^13.0.0",
     "ol": "^10.4.0",

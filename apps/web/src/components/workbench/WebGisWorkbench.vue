@@ -1,4 +1,21 @@
 <script setup lang="ts">
+import {
+  Aim,
+  CircleCheck,
+  Crop,
+  DocumentAdd,
+  DocumentChecked,
+  EditPen,
+  FolderOpened,
+  Link,
+  Location,
+  Minus,
+  Pointer,
+  Rank,
+  Refresh,
+  RefreshLeft,
+  Search
+} from "@element-plus/icons-vue";
 import { computed, nextTick, onMounted, shallowRef } from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
@@ -55,20 +72,20 @@ const activeLayerLabel = computed(() => (
 const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
 const menuItems = ["项目", "编辑", "视图", "图层", "设置", "插件", "矢量", "数据库", "网络", "帮助"];
 const toolbarItems = [
-  { label: "新建", icon: "doc" },
-  { label: "保存", icon: "save" },
-  { label: "撤销", icon: "undo" },
-  { label: "选择", icon: "cursor", active: true },
-  { label: "平移", icon: "pan" },
-  { label: "缩放", icon: "zoom" },
-  { label: "识别", icon: "identify" },
-  { label: "点", icon: "point" },
-  { label: "线", icon: "line" },
-  { label: "面", icon: "polygon" },
-  { label: "节点", icon: "nodes" },
-  { label: "吸附", icon: "snap", active: true },
-  { label: "校验", icon: "check" },
-  { label: "刷新", icon: "refresh" }
+  { label: "新建", icon: DocumentAdd },
+  { label: "保存", icon: DocumentChecked },
+  { label: "撤销", icon: RefreshLeft },
+  { label: "选择", icon: Pointer, active: true },
+  { label: "平移", icon: Rank },
+  { label: "缩放", icon: Search },
+  { label: "识别", icon: Aim },
+  { label: "点", icon: Location },
+  { label: "线", icon: Minus },
+  { label: "面", icon: Crop },
+  { label: "节点", icon: EditPen },
+  { label: "吸附", icon: Link, active: true },
+  { label: "校验", icon: CircleCheck },
+  { label: "刷新", icon: Refresh }
 ];
 
 onMounted(async () => {
@@ -128,11 +145,12 @@ function handleClearDraft() {
         type="button"
         :title="item.label"
       >
-        <span class="workbench__tool-icon" :class="`workbench__tool-icon--${item.icon}`"></span>
+        <component :is="item.icon" class="workbench__tool-icon" aria-hidden="true" />
         <span class="workbench__tool-label">{{ item.label }}</span>
       </button>
       <span class="workbench__separator"></span>
       <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="busy" type="button" @click="workspace.refreshAll">
+        <FolderOpened class="workbench__tool-icon" aria-hidden="true" />
         刷新图层
       </button>
     </section>
@@ -152,7 +170,7 @@ function handleClearDraft() {
       <aside class="workbench__left-dock" aria-label="浏览器与图层">
         <DatasourcePanel
           :datasources="datasources"
-          :form="datasourceForm"
+          v-model:form="datasourceForm"
           :busy="busy"
           @save="workspace.saveDatasource"
           @scan="workspace.scanDatasource"
@@ -302,8 +320,11 @@ function handleClearDraft() {
 }
 
 .workbench__tool--wide {
+  display: inline-flex;
   width: auto;
   min-width: 72px;
+  align-items: center;
+  gap: 5px;
   padding: 0 8px;
 }
 
@@ -325,149 +346,9 @@ function handleClearDraft() {
 }
 
 .workbench__tool-icon {
-  position: relative;
   display: block;
   width: 16px;
   height: 16px;
-}
-
-.workbench__tool-icon::before,
-.workbench__tool-icon::after {
-  position: absolute;
-  content: "";
-}
-
-.workbench__tool-icon--doc::before {
-  inset: 2px 3px;
-  border: 1px solid #313131;
-  background: #fbfbfb;
-}
-
-.workbench__tool-icon--save::before {
-  inset: 2px;
-  border: 1px solid #313131;
-  background: #dfe8f2;
-}
-
-.workbench__tool-icon--undo::before {
-  width: 12px;
-  height: 8px;
-  border-left: 2px solid #313131;
-  border-bottom: 2px solid #313131;
-  transform: rotate(45deg);
-  left: 2px;
-  top: 4px;
-}
-
-.workbench__tool-icon--cursor::before {
-  width: 0;
-  height: 0;
-  border-top: 14px solid #1d4f83;
-  border-right: 8px solid transparent;
-  left: 3px;
-  top: 1px;
-  transform: rotate(-18deg);
-}
-
-.workbench__tool-icon--pan::before {
-  inset: 7px 1px;
-  border-top: 2px solid #313131;
-}
-
-.workbench__tool-icon--pan::after {
-  inset: 1px 7px;
-  border-left: 2px solid #313131;
-}
-
-.workbench__tool-icon--zoom::before {
-  width: 9px;
-  height: 9px;
-  border: 2px solid #313131;
-  border-radius: 50%;
-  left: 1px;
-  top: 1px;
-}
-
-.workbench__tool-icon--zoom::after {
-  width: 7px;
-  border-top: 2px solid #313131;
-  left: 10px;
-  top: 12px;
-  transform: rotate(45deg);
-}
-
-.workbench__tool-icon--identify::before {
-  inset: 2px;
-  border: 1px solid #313131;
-}
-
-.workbench__tool-icon--point::before {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #d9b44a;
-  border: 1px solid #6f6330;
-  left: 4px;
-  top: 4px;
-}
-
-.workbench__tool-icon--line::before {
-  width: 15px;
-  border-top: 2px solid #313131;
-  left: 1px;
-  top: 11px;
-  transform: rotate(-38deg);
-}
-
-.workbench__tool-icon--polygon::before {
-  inset: 2px 3px;
-  background: #b5c99a;
-  border: 1px solid #63754a;
-  transform: skew(-12deg);
-}
-
-.workbench__tool-icon--nodes::before {
-  inset: 2px;
-  border: 1px solid var(--qgis-blue);
-}
-
-.workbench__tool-icon--nodes::after {
-  inset: 7px 2px;
-  border-top: 1px solid var(--qgis-blue);
-}
-
-.workbench__tool-icon--snap::before {
-  width: 15px;
-  border-top: 2px solid var(--qgis-blue);
-  left: 1px;
-  top: 11px;
-  transform: rotate(-45deg);
-}
-
-.workbench__tool-icon--snap::after {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--qgis-blue);
-  right: 0;
-  top: 2px;
-}
-
-.workbench__tool-icon--check::before {
-  width: 12px;
-  height: 7px;
-  border-left: 2px solid #2f6f3e;
-  border-bottom: 2px solid #2f6f3e;
-  transform: rotate(-45deg);
-  left: 2px;
-  top: 3px;
-}
-
-.workbench__tool-icon--refresh::before {
-  inset: 2px;
-  border: 2px solid #313131;
-  border-right-color: transparent;
-  border-radius: 50%;
 }
 
 .workbench__separator {
