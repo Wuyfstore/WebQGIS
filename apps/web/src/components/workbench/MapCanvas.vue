@@ -36,6 +36,9 @@ onMounted(() => {
     <div ref="mapRoot" class="map-canvas__map" aria-label="地图画布"></div>
 
     <div class="map-canvas__toolbar" aria-label="编辑工具栏">
+      <div class="map-canvas__toolbar-title">
+        编辑图层: {{ activeLayer ? `${activeLayer.schema}.${activeLayer.table}` : "未选择" }}
+      </div>
       <label class="map-canvas__mode">
         <span class="map-canvas__label">绘制类型</span>
         <select v-model="drawMode" class="map-canvas__select focus-ring">
@@ -75,6 +78,10 @@ onMounted(() => {
       <button class="map-canvas__button focus-ring" type="button" @click="emit('clear')">
         清空
       </button>
+
+      <p class="map-canvas__hint">
+        MVT 用于浏览，编辑草稿来自原始 PostGIS geometry
+      </p>
     </div>
   </section>
 </template>
@@ -83,28 +90,43 @@ onMounted(() => {
 .map-canvas {
   position: relative;
   min-width: 0;
-  background: #dbeafe;
+  min-height: 0;
+  border-right: 1px solid var(--qgis-border);
+  background:
+    linear-gradient(var(--qgis-map-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--qgis-map-grid) 1px, transparent 1px),
+    var(--qgis-map-bg);
+  background-size: 64px 64px;
 }
 
 .map-canvas__map {
   width: 100%;
-  height: 100vh;
+  height: 100%;
+  min-height: calc(100vh - 134px);
 }
 
 .map-canvas__toolbar {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  display: flex;
-  max-width: calc(100% - 24px);
-  flex-wrap: wrap;
+  top: 18px;
+  left: 18px;
+  display: grid;
+  grid-template-columns: 132px repeat(4, auto);
+  max-width: calc(100% - 36px);
   align-items: end;
   gap: 8px;
-  border: 1px solid #c7d2e2;
-  border-radius: 8px;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  border: 1px solid #b7b7b7;
+  background: rgba(250, 250, 250, 0.96);
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.map-canvas__toolbar-title {
+  grid-column: 1 / -1;
+  min-height: 24px;
+  border-bottom: 1px solid #9e9e9e;
+  padding: 5px 10px 0;
+  background: var(--qgis-dock-title);
+  color: var(--qgis-text);
+  font-weight: 600;
 }
 
 .map-canvas__mode {
@@ -112,50 +134,63 @@ onMounted(() => {
   width: 132px;
   flex-direction: column;
   gap: 3px;
+  padding-left: 10px;
 }
 
 .map-canvas__label {
-  color: #52627a;
+  color: var(--qgis-muted);
   font-size: 11px;
 }
 
 .map-canvas__select,
 .map-canvas__button {
-  min-height: 34px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #172033;
+  min-height: 26px;
+  border: 1px solid #8f8f8f;
+  background: #e8e8e8;
+  color: var(--qgis-text);
 }
 
 .map-canvas__select {
   width: 100%;
-  padding: 6px 8px;
+  padding: 2px 6px;
+  background: #ffffff;
 }
 
 .map-canvas__button {
-  min-width: 70px;
-  padding: 6px 10px;
+  min-width: 62px;
+  padding: 3px 10px;
 }
 
 .map-canvas__button--primary {
-  border-color: #1d4ed8;
-  background: #2563eb;
-  color: #ffffff;
+  border-color: #6f9fc9;
+  background: var(--qgis-blue-soft);
+  color: var(--qgis-blue);
 }
 
 .map-canvas__button--danger {
-  border-color: #fecaca;
-  color: #b91c1c;
+  border-color: #b88b8b;
+  background: #f3dddd;
+  color: var(--qgis-danger);
+}
+
+.map-canvas__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  border-top: 1px solid #d0d0d0;
+  padding: 6px 10px;
+  color: var(--qgis-muted);
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {
   .map-canvas__map {
     height: 58vh;
+    min-height: 58vh;
   }
 
   .map-canvas__toolbar {
     right: 12px;
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>

@@ -1,11 +1,33 @@
 :root {
   color-scheme: light;
   font-family:
-    Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  color: #172033;
-  background: #e7edf5;
+    "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #1f1f1f;
+  background: #d8d8d8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --qgis-app: #d8d8d8;
+  --qgis-menubar: #eeeeee;
+  --qgis-toolbar: #e4e4e4;
+  --qgis-dock: #f3f3f3;
+  --qgis-dock-title: #d7d7d7;
+  --qgis-pane: #fafafa;
+  --qgis-row: #ffffff;
+  --qgis-row-alt: #f5f5f5;
+  --qgis-row-active: #cfe8ff;
+  --qgis-border: #9f9f9f;
+  --qgis-border-soft: #c8c8c8;
+  --qgis-input: #ffffff;
+  --qgis-readonly: #ececec;
+  --qgis-text: #1f1f1f;
+  --qgis-muted: #5f6670;
+  --qgis-blue: #145aa3;
+  --qgis-blue-soft: #d9e9f8;
+  --qgis-green: #2f6f3e;
+  --qgis-warn: #915c00;
+  --qgis-danger: #9a1c1c;
+  --qgis-map-bg: #f6f4e9;
+  --qgis-map-grid: #d7d0b9;
 }
 
 * {
@@ -20,6 +42,7 @@ body,
 
 body {
   margin: 0;
+  overflow: hidden;
 }
 
 button,
@@ -37,4 +60,14 @@ input:disabled,
 select:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+.focus-ring:focus-visible {
+  outline: 1px solid var(--qgis-blue);
+  outline-offset: -1px;
+}
+
+.workbench-panel {
+  border: 1px solid var(--qgis-border);
+  background: var(--qgis-dock);
 }

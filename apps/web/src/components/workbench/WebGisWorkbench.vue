@@ -28,6 +28,23 @@ const statusClasses = computed(() => ({
   "workbench__status--warning": workspace.status.value.tone === "warning",
   "workbench__status--danger": workspace.status.value.tone === "danger"
 }));
+const menuItems = ["项目", "编辑", "视图", "图层", "设置", "插件", "矢量", "数据库", "网络", "帮助"];
+const toolbarItems = [
+  { label: "新建", icon: "doc" },
+  { label: "保存", icon: "save" },
+  { label: "撤销", icon: "undo" },
+  { label: "选择", icon: "cursor", active: true },
+  { label: "平移", icon: "pan" },
+  { label: "缩放", icon: "zoom" },
+  { label: "识别", icon: "identify" },
+  { label: "点", icon: "point" },
+  { label: "线", icon: "line" },
+  { label: "面", icon: "polygon" },
+  { label: "节点", icon: "nodes" },
+  { label: "吸附", icon: "snap", active: true },
+  { label: "校验", icon: "check" },
+  { label: "刷新", icon: "refresh" }
+];
 
 onMounted(async () => {
   await nextTick();
@@ -67,64 +84,96 @@ function handleClearDraft() {
 
 <template>
   <main class="workbench">
-    <aside class="workbench__sidebar" aria-label="数据源与图层">
-      <section class="workbench__masthead workbench-panel">
-        <div class="workbench__brand">
-          <p class="workbench__eyebrow">PostGIS 编辑与发布</p>
-          <h1 class="workbench__title">WebQGIS</h1>
-        </div>
-        <button class="workbench__refresh focus-ring" :disabled="workspace.busy.value" type="button" @click="workspace.refreshAll">
-          刷新
+    <header class="workbench__menubar">
+      <strong class="workbench__brand">WebQGIS</strong>
+      <nav class="workbench__menu" aria-label="应用菜单">
+        <button v-for="item in menuItems" :key="item" class="workbench__menu-item focus-ring" type="button">
+          {{ item }}
         </button>
-        <div class="workbench__metrics" aria-label="图层概览">
-          <span>{{ workspace.registeredLayerCount.value }} 图层</span>
-          <span>{{ workspace.editableLayerCount.value }} 可编辑</span>
-        </div>
-        <p class="workbench__status" :class="statusClasses" role="status">
-          {{ workspace.status.value.text }}
-        </p>
-      </section>
+      </nav>
+      <span class="workbench__connection">PostgreSQL: Local PostGIS / public</span>
+    </header>
 
-      <DatasourcePanel
-        :datasources="workspace.datasources.value"
-        :form="workspace.datasourceForm"
+    <section class="workbench__toolbar" aria-label="QGIS 风格工具栏">
+      <button
+        v-for="item in toolbarItems"
+        :key="item.label"
+        class="workbench__tool focus-ring"
+        :class="{ 'workbench__tool--active': item.active }"
+        type="button"
+        :title="item.label"
+      >
+        <span class="workbench__tool-icon" :class="`workbench__tool-icon--${item.icon}`"></span>
+        <span class="workbench__tool-label">{{ item.label }}</span>
+      </button>
+      <span class="workbench__separator"></span>
+      <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="workspace.busy.value" type="button" @click="workspace.refreshAll">
+        刷新图层
+      </button>
+    </section>
+
+    <section class="workbench__contextbar" aria-label="编辑上下文">
+      <span class="workbench__context-label">活动图层:</span>
+      <span class="workbench__context-field">{{ workspace.activeLayer.value ? `${workspace.activeLayer.value.schema}.${workspace.activeLayer.value.table}` : "未选择" }}</span>
+      <span class="workbench__context-label">编辑:</span>
+      <span class="workbench__context-badge">{{ workspace.activeLayer.value?.editable ? "开启" : "只读" }}</span>
+      <span class="workbench__context-label">捕捉:</span>
+      <span class="workbench__context-field">顶点 + 线段, 8 px</span>
+      <span class="workbench__context-note">显示链路: MVT</span>
+      <span class="workbench__context-note">编辑链路: 原始 PostGIS geometry</span>
+    </section>
+
+    <section class="workbench__body">
+      <aside class="workbench__left-dock" aria-label="浏览器与图层">
+        <DatasourcePanel
+          :datasources="workspace.datasources.value"
+          :form="workspace.datasourceForm"
+          :busy="workspace.busy.value"
+          @save="workspace.saveDatasource"
+          @scan="workspace.scanDatasource"
+        />
+
+        <LayerPanel
+          :layers="workspace.layers.value"
+          :active-layer-id="workspace.activeLayerId.value"
+          :visible-layer-ids="workspace.visibleLayerIds.value"
+          :editable-layer-count="workspace.editableLayerCount.value"
+          @select="workspace.setActiveLayer"
+          @toggle="workspace.toggleLayer"
+          @update-style="workspace.updateLayerStyle"
+        />
+      </aside>
+
+      <MapCanvas
+        v-model:draw-mode="editor.drawMode.value"
+        :active-layer="workspace.activeLayer.value"
         :busy="workspace.busy.value"
-        @save="workspace.saveDatasource"
-        @scan="workspace.scanDatasource"
+        :has-draft-geometry="hasDraftGeometry"
+        :has-selected-feature="hasSelectedFeature"
+        :is-drawing="editor.isDrawing.value"
+        @ready="handleMapReady"
+        @draw="editor.startDrawing"
+        @save="handleSaveFeature"
+        @delete="handleDeleteFeature"
+        @clear="handleClearDraft"
       />
 
-      <LayerPanel
-        :layers="workspace.layers.value"
-        :active-layer-id="workspace.activeLayerId.value"
-        :visible-layer-ids="workspace.visibleLayerIds.value"
-        :editable-layer-count="workspace.editableLayerCount.value"
-        @select="workspace.setActiveLayer"
-        @toggle="workspace.toggleLayer"
-        @update-style="workspace.updateLayerStyle"
+      <EditInspector
+        v-model:selected-properties="workspace.selectedProperties.value"
+        :active-layer="workspace.activeLayer.value"
+        :editable-fields="workspace.editableFields.value"
+        :selected-layer-status="workspace.selectedLayerStatus.value"
+        :selected-feature-id="workspace.selectedFeatureId.value"
       />
-    </aside>
+    </section>
 
-    <MapCanvas
-      v-model:draw-mode="editor.drawMode.value"
-      :active-layer="workspace.activeLayer.value"
-      :busy="workspace.busy.value"
-      :has-draft-geometry="hasDraftGeometry"
-      :has-selected-feature="hasSelectedFeature"
-      :is-drawing="editor.isDrawing.value"
-      @ready="handleMapReady"
-      @draw="editor.startDrawing"
-      @save="handleSaveFeature"
-      @delete="handleDeleteFeature"
-      @clear="handleClearDraft"
-    />
-
-    <EditInspector
-      v-model:selected-properties="workspace.selectedProperties.value"
-      :active-layer="workspace.activeLayer.value"
-      :editable-fields="workspace.editableFields.value"
-      :selected-layer-status="workspace.selectedLayerStatus.value"
-      :selected-feature-id="workspace.selectedFeatureId.value"
-    />
+    <footer class="workbench__statusbar">
+      <span>坐标 104.0648, 30.6572</span>
+      <span>比例尺 1:2500</span>
+      <span>EPSG:3857 显示 / EPSG:4326 数据源</span>
+      <span class="workbench__statusbar-ok">捕捉: 顶点+线段 8 px</span>
+      <span :class="statusClasses" class="workbench__status" role="status">{{ workspace.status.value.text }}</span>
+    </footer>
 
     <div v-if="editor.isDeleteDialogOpen.value" class="workbench__dialog-backdrop">
       <section class="workbench__dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
@@ -147,102 +196,338 @@ function handleClearDraft() {
 
 <style scoped>
 .workbench {
-  display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) minmax(300px, 340px);
-  min-height: 100vh;
-  color: #172033;
-  background: #e7edf5;
-}
-
-.workbench__sidebar {
   display: flex;
+  min-width: 1180px;
+  min-height: 100vh;
   flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
-  padding: 12px;
-  background: #f8fafc;
-  border-right: 1px solid #dbe3ef;
+  color: var(--qgis-text);
+  background: var(--qgis-app);
+  font-size: 12px;
 }
 
-.workbench__masthead {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 14px;
+.workbench__menubar,
+.workbench__toolbar,
+.workbench__contextbar,
+.workbench__statusbar {
+  flex: 0 0 auto;
+}
+
+.workbench__menubar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  border-bottom: 1px solid #a9a9a9;
+  background: var(--qgis-menubar);
 }
 
 .workbench__brand {
-  min-width: 0;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
-.workbench__eyebrow {
-  margin: 0 0 2px;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.workbench__title {
-  margin: 0;
-  color: #172033;
-  font-size: 22px;
-  letter-spacing: 0;
-}
-
-.workbench__refresh {
-  align-self: start;
-  min-height: 34px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #172033;
-  padding: 6px 10px;
-}
-
-.workbench__metrics {
+.workbench__menu {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  grid-column: 1 / -1;
-  color: #475569;
-  font-size: 12px;
+  align-items: stretch;
+  height: 100%;
 }
 
-.workbench__metrics span {
-  border: 1px solid #dbe3ef;
-  border-radius: 999px;
+.workbench__menu-item {
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.workbench__menu-item:hover {
+  background: #dcdcdc;
+}
+
+.workbench__connection {
+  margin-left: auto;
+  padding-right: 16px;
+  color: var(--qgis-green);
+}
+
+.workbench__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 34px;
+  border-bottom: 1px solid #a5a5a5;
   padding: 3px 8px;
+  background: var(--qgis-toolbar);
+}
+
+.workbench__tool {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid #8d8d8d;
+  background: #efefef;
+  color: var(--qgis-text);
+  padding: 0;
+}
+
+.workbench__tool--active {
+  border-color: #4d86ba;
+  background: #b8d6f0;
+}
+
+.workbench__tool--wide {
+  width: auto;
+  min-width: 72px;
+  padding: 0 8px;
+}
+
+.workbench__tool-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.workbench__tool--wide .workbench__tool-label,
+.workbench__tool--wide {
+  position: static;
+  width: auto;
+  height: 26px;
+  overflow: visible;
+  clip: auto;
+}
+
+.workbench__tool-icon {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.workbench__tool-icon::before,
+.workbench__tool-icon::after {
+  position: absolute;
+  content: "";
+}
+
+.workbench__tool-icon--doc::before {
+  inset: 2px 3px;
+  border: 1px solid #313131;
+  background: #fbfbfb;
+}
+
+.workbench__tool-icon--save::before {
+  inset: 2px;
+  border: 1px solid #313131;
+  background: #dfe8f2;
+}
+
+.workbench__tool-icon--undo::before {
+  width: 12px;
+  height: 8px;
+  border-left: 2px solid #313131;
+  border-bottom: 2px solid #313131;
+  transform: rotate(45deg);
+  left: 2px;
+  top: 4px;
+}
+
+.workbench__tool-icon--cursor::before {
+  width: 0;
+  height: 0;
+  border-top: 14px solid #1d4f83;
+  border-right: 8px solid transparent;
+  left: 3px;
+  top: 1px;
+  transform: rotate(-18deg);
+}
+
+.workbench__tool-icon--pan::before {
+  inset: 7px 1px;
+  border-top: 2px solid #313131;
+}
+
+.workbench__tool-icon--pan::after {
+  inset: 1px 7px;
+  border-left: 2px solid #313131;
+}
+
+.workbench__tool-icon--zoom::before {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #313131;
+  border-radius: 50%;
+  left: 1px;
+  top: 1px;
+}
+
+.workbench__tool-icon--zoom::after {
+  width: 7px;
+  border-top: 2px solid #313131;
+  left: 10px;
+  top: 12px;
+  transform: rotate(45deg);
+}
+
+.workbench__tool-icon--identify::before {
+  inset: 2px;
+  border: 1px solid #313131;
+}
+
+.workbench__tool-icon--point::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #d9b44a;
+  border: 1px solid #6f6330;
+  left: 4px;
+  top: 4px;
+}
+
+.workbench__tool-icon--line::before {
+  width: 15px;
+  border-top: 2px solid #313131;
+  left: 1px;
+  top: 11px;
+  transform: rotate(-38deg);
+}
+
+.workbench__tool-icon--polygon::before {
+  inset: 2px 3px;
+  background: #b5c99a;
+  border: 1px solid #63754a;
+  transform: skew(-12deg);
+}
+
+.workbench__tool-icon--nodes::before {
+  inset: 2px;
+  border: 1px solid var(--qgis-blue);
+}
+
+.workbench__tool-icon--nodes::after {
+  inset: 7px 2px;
+  border-top: 1px solid var(--qgis-blue);
+}
+
+.workbench__tool-icon--snap::before {
+  width: 15px;
+  border-top: 2px solid var(--qgis-blue);
+  left: 1px;
+  top: 11px;
+  transform: rotate(-45deg);
+}
+
+.workbench__tool-icon--snap::after {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--qgis-blue);
+  right: 0;
+  top: 2px;
+}
+
+.workbench__tool-icon--check::before {
+  width: 12px;
+  height: 7px;
+  border-left: 2px solid #2f6f3e;
+  border-bottom: 2px solid #2f6f3e;
+  transform: rotate(-45deg);
+  left: 2px;
+  top: 3px;
+}
+
+.workbench__tool-icon--refresh::before {
+  inset: 2px;
+  border: 2px solid #313131;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+.workbench__separator {
+  width: 1px;
+  height: 24px;
+  margin: 0 6px;
+  background: #9b9b9b;
+}
+
+.workbench__contextbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  border-bottom: 1px solid #a5a5a5;
+  padding: 4px 12px;
+  background: var(--qgis-toolbar);
+}
+
+.workbench__context-label,
+.workbench__context-note {
+  color: var(--qgis-muted);
+}
+
+.workbench__context-field {
+  min-width: 136px;
+  border: 1px solid #aeb6bf;
   background: #ffffff;
+  padding: 2px 8px;
+}
+
+.workbench__context-badge {
+  border: 1px solid #6f9fc9;
+  background: var(--qgis-blue-soft);
+  color: var(--qgis-blue);
+  padding: 2px 16px;
+}
+
+.workbench__body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 330px minmax(520px, 1fr) 360px;
+  min-height: 0;
+}
+
+.workbench__left-dock {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--qgis-dock);
+  border-right: 1px solid var(--qgis-border);
+}
+
+.workbench__statusbar {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  height: 40px;
+  border-top: 1px solid #a0a0a0;
+  padding: 0 12px;
+  background: var(--qgis-menubar);
+  color: var(--qgis-text);
+  white-space: nowrap;
+}
+
+.workbench__statusbar-ok {
+  color: var(--qgis-green);
 }
 
 .workbench__status {
-  grid-column: 1 / -1;
-  min-height: 34px;
-  margin: 0;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  padding: 8px;
-  background: #eff6ff;
-  color: #1e3a8a;
-  font-size: 13px;
-  line-height: 1.35;
+  margin-left: auto;
+  color: var(--qgis-muted);
 }
 
 .workbench__status--success {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #166534;
+  color: var(--qgis-green);
 }
 
 .workbench__status--warning {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #92400e;
+  color: var(--qgis-warn);
 }
 
 .workbench__status--danger {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #991b1b;
+  color: var(--qgis-danger);
 }
 
 .workbench__dialog-backdrop {
@@ -257,23 +542,22 @@ function handleClearDraft() {
 
 .workbench__dialog {
   width: min(420px, 100%);
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
+  border: 1px solid var(--qgis-border);
   padding: 18px;
-  background: #ffffff;
+  background: var(--qgis-pane);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
 }
 
 .workbench__dialog-title {
   margin: 0 0 8px;
-  color: #172033;
-  font-size: 18px;
+  color: var(--qgis-text);
+  font-size: 15px;
 }
 
 .workbench__dialog-copy {
   margin: 0;
-  color: #475569;
-  font-size: 14px;
+  color: var(--qgis-muted);
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -286,32 +570,45 @@ function handleClearDraft() {
 
 .workbench__dialog-button {
   min-height: 34px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #172033;
+  border: 1px solid #8f8f8f;
+  background: #e8e8e8;
+  color: var(--qgis-text);
   padding: 6px 12px;
 }
 
 .workbench__dialog-button--danger {
-  border-color: #b91c1c;
-  background: #dc2626;
-  color: #ffffff;
+  border-color: #b88b8b;
+  background: #f3dddd;
+  color: var(--qgis-danger);
 }
 
 @media (max-width: 1100px) {
-  .workbench {
-    grid-template-columns: 300px minmax(0, 1fr);
+  .workbench__body {
+    grid-template-columns: 300px minmax(520px, 1fr);
+  }
+
+  .workbench__statusbar {
+    gap: 14px;
   }
 }
 
 @media (max-width: 760px) {
   .workbench {
+    min-width: 0;
+    overflow: auto;
+  }
+
+  .workbench__body {
     grid-template-columns: 1fr;
   }
 
-  .workbench__sidebar {
-    max-height: none;
+  .workbench__contextbar,
+  .workbench__statusbar {
+    flex-wrap: wrap;
+    height: auto;
+  }
+
+  .workbench__left-dock {
     border-right: 0;
   }
 }
