@@ -2,6 +2,69 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shallowRef } from "vue";
 import WebGisWorkbench from "./WebGisWorkbench.vue";
+import type { Datasource, LayerRegistration } from "../../types/gis";
+
+const sampleDatasources: Datasource[] = [];
+const sampleLayers: LayerRegistration[] = [
+  {
+    id: "province",
+    datasourceId: "local",
+    schema: "public",
+    table: "china_2025_province",
+    geometryColumn: "geom",
+    geometryType: "MultiPolygon",
+    srid: 4326,
+    primaryKey: "id",
+    fields: [],
+    hasSpatialIndex: true,
+    canSelect: true,
+    canInsert: false,
+    canUpdate: true,
+    canDelete: false,
+    queryable: true,
+    editable: true,
+    editableReason: [],
+    tileUrl: "/api/layers/province/tile/{z}/{x}/{y}.mvt",
+    style: {
+      fill: "#5ca8ff66",
+      stroke: "#2563eb",
+      strokeWidth: 1,
+      pointRadius: 5,
+      opacity: 0.6
+    },
+    extent: null,
+    updatedAt: "2026-06-12T00:00:00.000Z"
+  },
+  {
+    id: "city",
+    datasourceId: "local",
+    schema: "public",
+    table: "china_2025_city",
+    geometryColumn: "geom",
+    geometryType: "MultiPolygon",
+    srid: 4326,
+    primaryKey: "id",
+    fields: [],
+    hasSpatialIndex: true,
+    canSelect: true,
+    canInsert: true,
+    canUpdate: true,
+    canDelete: true,
+    queryable: true,
+    editable: true,
+    editableReason: [],
+    tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt",
+    style: {
+      fill: "#94d82d66",
+      stroke: "#2f9e44",
+      strokeWidth: 1,
+      pointRadius: 5,
+      opacity: 0.6
+    },
+    extent: null,
+    updatedAt: "2026-06-12T00:00:00.000Z"
+  }
+];
 
 const editorMock = {
   drawMode: shallowRef("Point"),
@@ -25,6 +88,19 @@ const editorMock = {
 
 vi.mock("../../composables/useOpenLayersEditor", () => ({
   useOpenLayersEditor: () => editorMock
+}));
+
+vi.mock("../../api", () => ({
+  apiGet: vi.fn(async (path: string) => {
+    if (path === "/api/datasources") {
+      return sampleDatasources;
+    }
+    if (path === "/api/layers") {
+      return sampleLayers;
+    }
+    throw new Error(`Unhandled apiGet ${path}`);
+  }),
+  apiSend: vi.fn()
 }));
 
 describe("WebGisWorkbench", () => {
@@ -129,5 +205,48 @@ describe("WebGisWorkbench", () => {
 
     expect(editorMock.activateTool).toHaveBeenCalledWith("select");
     expect(editorMock.toggleSnap).toHaveBeenCalled();
+  });
+
+  it("shows only one layer from the layer panel solo action", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+
+    const soloButtons = wrapper.findAll(".layer-panel__solo");
+    expect(soloButtons).toHaveLength(2);
+
+    await soloButtons[1].trigger("click");
+
+    const visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
+    expect(visibilityInputs[0].element.checked).toBe(false);
+    expect(visibilityInputs[1].element.checked).toBe(true);
+    expect(wrapper.text()).toContain("已仅显示图层：public.china_2025_city");
+  });
+
+  it("can show only the active layer and then show all layers from the layer menu", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+
+    await wrapper.findAll(".workbench__menu-item")
+      .find((item) => item.text() === "图层")
+      ?.trigger("click");
+    await wrapper.findAll(".workbench__menu-command")
+      .find((item) => item.text() === "仅显示当前图层")
+      ?.trigger("click");
+
+    let visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
+    expect(visibilityInputs[0].element.checked).toBe(true);
+    expect(visibilityInputs[1].element.checked).toBe(false);
+
+    await wrapper.findAll(".workbench__menu-item")
+      .find((item) => item.text() === "图层")
+      ?.trigger("click");
+    await wrapper.findAll(".workbench__menu-command")
+      .find((item) => item.text() === "显示全部图层")
+      ?.trigger("click");
+
+    visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
+    expect(visibilityInputs[0].element.checked).toBe(true);
+    expect(visibilityInputs[1].element.checked).toBe(true);
+    expect(wrapper.text()).toContain("已显示全部 2 个图层");
   });
 });

@@ -119,7 +119,9 @@ const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
   图层: [
     { label: "刷新图层列表", action: handleRefreshAll, disabled: busy.value },
     { label: "校验当前图层", action: validateActiveLayer, disabled: busy.value },
-    { label: "切换当前图层可见性", action: toggleActiveLayerVisibility, disabled: busy.value || !activeLayer.value }
+    { label: "切换当前图层可见性", action: toggleActiveLayerVisibility, disabled: busy.value || !activeLayer.value },
+    { label: "仅显示当前图层", action: showOnlyActiveLayer, disabled: busy.value || !activeLayer.value },
+    { label: "显示全部图层", action: showAllLayers, disabled: busy.value || layers.value.length === 0 }
   ],
   设置: [
     { label: "切换吸附", action: editor.toggleSnap, disabled: busy.value },
@@ -358,6 +360,19 @@ function toggleActiveLayerVisibility() {
   workspace.setStatus(`已切换图层可见性：${layer.schema}.${layer.table}`, "success");
 }
 
+function showOnlyActiveLayer() {
+  const layer = activeLayer.value;
+  if (!layer) {
+    workspace.setStatus("请先选择一个图层", "warning");
+    return;
+  }
+  workspace.showOnlyLayer(layer.id);
+}
+
+function showAllLayers() {
+  workspace.showAllLayers();
+}
+
 function validateActiveLayer() {
   const layer = activeLayer.value;
   if (!layer) {
@@ -455,6 +470,7 @@ function validateActiveLayer() {
           :editable-layer-count="editableLayerCount"
           @select="workspace.setActiveLayer"
           @toggle="workspace.toggleLayer"
+          @solo="workspace.showOnlyLayer"
           @update-style="workspace.updateLayerStyle"
         />
       </aside>

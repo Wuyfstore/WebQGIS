@@ -133,6 +133,29 @@ export function useWebGisWorkspace() {
     replaceVisibleLayerIds(nextVisible);
   }
 
+  function showOnlyLayer(layerId: string) {
+    const layer = layers.value.find((item) => item.id === layerId);
+    if (!layer) {
+      setStatus("请先选择一个可显示的图层", "warning");
+      return false;
+    }
+    activeLayerId.value = layer.id;
+    clearDraftState();
+    replaceVisibleLayerIds(new Set([layer.id]));
+    setStatus(`已仅显示图层：${layer.schema}.${layer.table}`, "success");
+    return true;
+  }
+
+  function showAllLayers() {
+    if (layers.value.length === 0) {
+      setStatus("暂无可显示的图层", "warning");
+      return false;
+    }
+    replaceVisibleLayerIds(new Set(layers.value.map((layer) => layer.id)));
+    setStatus(`已显示全部 ${layers.value.length} 个图层`, "success");
+    return true;
+  }
+
   async function readFeature(layerId: string, pk: string) {
     const layer = layers.value.find((item) => item.id === layerId);
     if (!layer?.queryable) {
@@ -213,6 +236,8 @@ export function useWebGisWorkspace() {
     scanDatasource,
     setActiveLayer,
     toggleLayer,
+    showOnlyLayer,
+    showAllLayers,
     readFeature,
     saveFeature,
     deleteSelectedFeature,
