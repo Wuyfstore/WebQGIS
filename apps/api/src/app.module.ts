@@ -7,6 +7,7 @@ import { DatasourcesModule } from "./datasources/datasources.module.js";
 import { LayersModule } from "./layers/layers.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { PostgisModule } from "./postgis/postgis.module.js";
+import { ClientLogsModule } from "./client-logs/client-logs.module.js";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PostgisModule } from "./postgis/postgis.module.js";
     StorageModule,
     PostgisModule,
     HealthModule,
+    ClientLogsModule,
     DatasourcesModule,
     LayersModule
   ]
