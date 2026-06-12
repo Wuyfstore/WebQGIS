@@ -49,6 +49,7 @@ const {
   activeLayerId,
   activeLayer,
   visibleLayerIds,
+  canRestoreVisibleLayerIds,
   busy,
   status,
   selectedFeatureId,
@@ -121,7 +122,8 @@ const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
     { label: "校验当前图层", action: validateActiveLayer, disabled: busy.value },
     { label: "切换当前图层可见性", action: toggleActiveLayerVisibility, disabled: busy.value || !activeLayer.value },
     { label: "仅显示当前图层", action: showOnlyActiveLayer, disabled: busy.value || !activeLayer.value },
-    { label: "显示全部图层", action: showAllLayers, disabled: busy.value || layers.value.length === 0 }
+    { label: "显示全部图层", action: showAllLayers, disabled: busy.value || layers.value.length === 0 },
+    { label: "恢复上次可见性", action: restorePreviousVisibleLayers, disabled: busy.value || !canRestoreVisibleLayerIds.value }
   ],
   设置: [
     { label: "切换吸附", action: editor.toggleSnap, disabled: busy.value },
@@ -371,6 +373,10 @@ function showOnlyActiveLayer() {
 
 function showAllLayers() {
   workspace.showAllLayers();
+}
+
+function restorePreviousVisibleLayers() {
+  workspace.restorePreviousVisibleLayers();
 }
 
 function validateActiveLayer() {

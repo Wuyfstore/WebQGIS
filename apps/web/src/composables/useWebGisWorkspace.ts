@@ -28,6 +28,7 @@ export function useWebGisWorkspace() {
   const layers = shallowRef<LayerRegistration[]>([]);
   const activeLayerId = shallowRef("");
   const visibleLayerIds = shallowRef(new Set<string>());
+  const previousVisibleLayerIds = shallowRef<Set<string> | null>(null);
   const busy = shallowRef(false);
   const status = shallowRef<StatusMessage>({ text: "就绪", tone: "neutral" });
   const selectedFeatureId = shallowRef<string | null>(null);
@@ -39,6 +40,7 @@ export function useWebGisWorkspace() {
   const editableFields = computed(() => getEditableFields(activeLayer.value));
   const selectedLayerStatus = computed(() => getLayerStatus(activeLayer.value));
   const visibleLayers = computed(() => layers.value.filter((layer) => visibleLayerIds.value.has(layer.id)));
+  const canRestoreVisibleLayerIds = computed(() => Boolean(previousVisibleLayerIds.value?.size));
   const registeredLayerCount = computed(() => layers.value.length);
   const editableLayerCount = computed(() => layers.value.filter((layer) => layer.editable).length);
 
@@ -48,6 +50,10 @@ export function useWebGisWorkspace() {
 
   function replaceVisibleLayerIds(next: Set<string>) {
     visibleLayerIds.value = new Set(next);
+  }
+
+  function rememberVisibleLayerIds() {
+    previousVisibleLayerIds.value = new Set(visibleLayerIds.value);
   }
 
   function setSelectedFeature(feature: GeoJsonFeature, fallbackId?: string) {
@@ -139,6 +145,7 @@ export function useWebGisWorkspace() {
       setStatus("请先选择一个可显示的图层", "warning");
       return false;
     }
+    rememberVisibleLayerIds();
     activeLayerId.value = layer.id;
     clearDraftState();
     replaceVisibleLayerIds(new Set([layer.id]));
@@ -151,8 +158,27 @@ export function useWebGisWorkspace() {
       setStatus("暂无可显示的图层", "warning");
       return false;
     }
+    rememberVisibleLayerIds();
     replaceVisibleLayerIds(new Set(layers.value.map((layer) => layer.id)));
     setStatus(`已显示全部 ${layers.value.length} 个图层`, "success");
+    return true;
+  }
+
+  function restorePreviousVisibleLayers() {
+    if (!previousVisibleLayerIds.value?.size) {
+      setStatus("暂无可恢复的图层可见性", "warning");
+      return false;
+    }
+    const availableIds = new Set(layers.value.map((layer) => layer.id));
+    const restored = new Set([...previousVisibleLayerIds.value].filter((layerId) => availableIds.has(layerId)));
+    if (restored.size === 0) {
+      previousVisibleLayerIds.value = null;
+      setStatus("上一组可见图层已不存在", "warning");
+      return false;
+    }
+    replaceVisibleLayerIds(restored);
+    previousVisibleLayerIds.value = null;
+    setStatus(`已恢复 ${restored.size} 个图层的可见性`, "success");
     return true;
   }
 
@@ -221,6 +247,7 @@ export function useWebGisWorkspace() {
     activeLayer,
     visibleLayerIds,
     visibleLayers,
+    canRestoreVisibleLayerIds,
     busy,
     status,
     selectedFeatureId,
@@ -238,6 +265,7 @@ export function useWebGisWorkspace() {
     toggleLayer,
     showOnlyLayer,
     showAllLayers,
+    restorePreviousVisibleLayers,
     readFeature,
     saveFeature,
     deleteSelectedFeature,

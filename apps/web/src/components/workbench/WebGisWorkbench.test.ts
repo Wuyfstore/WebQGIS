@@ -249,4 +249,31 @@ describe("WebGisWorkbench", () => {
     expect(visibilityInputs[1].element.checked).toBe(true);
     expect(wrapper.text()).toContain("已显示全部 2 个图层");
   });
+
+  it("restores previous layer visibility after using solo mode", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+
+    const visibilityInputs = () => wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
+    await visibilityInputs()[1].setValue(false);
+    expect(visibilityInputs()[0].element.checked).toBe(true);
+    expect(visibilityInputs()[1].element.checked).toBe(false);
+
+    await wrapper.findAll(".layer-panel__solo")[1].trigger("click");
+    expect(visibilityInputs()[0].element.checked).toBe(false);
+    expect(visibilityInputs()[1].element.checked).toBe(true);
+
+    await wrapper.findAll(".workbench__menu-item")
+      .find((item) => item.text() === "图层")
+      ?.trigger("click");
+    const restoreCommand = wrapper.findAll(".workbench__menu-command")
+      .find((item) => item.text() === "恢复上次可见性");
+    expect(restoreCommand?.attributes("disabled")).toBeUndefined();
+
+    await restoreCommand?.trigger("click");
+
+    expect(visibilityInputs()[0].element.checked).toBe(true);
+    expect(visibilityInputs()[1].element.checked).toBe(false);
+    expect(wrapper.text()).toContain("已恢复 1 个图层的可见性");
+  });
 });
