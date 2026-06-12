@@ -276,4 +276,59 @@ describe("WebGisWorkbench", () => {
     expect(visibilityInputs()[1].element.checked).toBe(false);
     expect(wrapper.text()).toContain("已恢复 1 个图层的可见性");
   });
+
+  it("opens layer context menu and runs layer commands", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+
+    expect(document.body.textContent).toContain("独显图层");
+    expect(document.body.textContent).toContain("缩放到图层");
+    expect(document.body.textContent).toContain("打开属性表");
+
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[0].click();
+    await flushPromises();
+
+    let visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
+    expect(visibilityInputs[0].element.checked).toBe(false);
+    expect(visibilityInputs[1].element.checked).toBe(true);
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[1].click();
+    await flushPromises();
+
+    visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
+    expect(visibilityInputs[0].element.checked).toBe(true);
+    expect(visibilityInputs[1].element.checked).toBe(true);
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[2].click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("缩放到图层暂未接入地图视图：public.china_2025_city");
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[3].click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("属性表面板尚未纳入 V1：public.china_2025_city");
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
+  });
 });

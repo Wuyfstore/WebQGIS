@@ -1,23 +1,77 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, shallowRef } from "vue";
 import type { LayerRegistration, LayerStylePatch } from "../../types/gis";
 
-defineProps<{
+const props = defineProps<{
   layers: LayerRegistration[];
   activeLayerId: string;
   visibleLayerIds: Set<string>;
   editableLayerCount: number;
+  canRestoreVisibleLayerIds: boolean;
 }>();
 
 const emit = defineEmits<{
   select: [layerId: string];
   toggle: [layerId: string];
   solo: [layerId: string];
+  restoreVisibility: [];
+  zoomToLayer: [layerId: string];
+  openAttributeTable: [layerId: string];
   updateStyle: [layerId: string, patch: LayerStylePatch];
 }>();
+
+const contextMenu = shallowRef({
+  visible: false,
+  layerId: "",
+  x: 0,
+  y: 0
+});
+const contextMenuStyle = computed(() => ({
+  left: `${contextMenu.value.x}px`,
+  top: `${contextMenu.value.y}px`
+}));
+const contextLayer = computed(() => props.layers.find((layer) => layer.id === contextMenu.value.layerId));
 
 function readNumber(event: Event): number {
   return Number((event.target as HTMLInputElement).value);
 }
+
+function openLayerContextMenu(event: MouseEvent, layerId: string) {
+  event.preventDefault();
+  emit("select", layerId);
+  contextMenu.value = {
+    visible: true,
+    layerId,
+    x: Math.min(event.clientX, window.innerWidth - 206),
+    y: Math.min(event.clientY, window.innerHeight - 138)
+  };
+  window.addEventListener("click", closeLayerContextMenu, { once: true });
+}
+
+function closeLayerContextMenu() {
+  contextMenu.value = {
+    ...contextMenu.value,
+    visible: false
+  };
+}
+
+function runLayerCommand(action: () => void) {
+  closeLayerContextMenu();
+  action();
+}
+
+function runContextLayerCommand(action: (layerId: string) => void) {
+  const layer = contextLayer.value;
+  if (!layer) {
+    closeLayerContextMenu();
+    return;
+  }
+  runLayerCommand(() => action(layer.id));
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("click", closeLayerContextMenu);
+});
 </script>
 
 <template>
@@ -38,6 +92,7 @@ function readNumber(event: Event): number {
           :key="layer.id"
           class="layer-panel__row"
           :class="{ 'layer-panel__row--active': activeLayerId === layer.id }"
+          @contextmenu="openLayerContextMenu($event, layer.id)"
         >
           <label class="layer-panel__visibility">
             <input
@@ -145,6 +200,29 @@ function readNumber(event: Event): number {
           </label>
         </article>
       </div>
+
+      <Teleport to="body">
+        <div v-if="contextMenu.visible && contextLayer" class="layer-panel__context-menu" :style="contextMenuStyle" role="menu">
+          <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('solo', layerId))">
+            独显图层
+          </button>
+          <button
+            class="layer-panel__context-item"
+            :disabled="!canRestoreVisibleLayerIds"
+            type="button"
+            role="menuitem"
+            @click="runLayerCommand(() => emit('restoreVisibility'))"
+          >
+            恢复上次可见性
+          </button>
+          <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('zoomToLayer', layerId))">
+            缩放到图层
+          </button>
+          <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('openAttributeTable', layerId))">
+            打开属性表
+          </button>
+        </div>
+      </Teleport>
     </section>
   </section>
 </template>
@@ -251,6 +329,35 @@ function readNumber(event: Event): number {
 
 .layer-panel__solo:hover {
   background: var(--qgis-blue-soft);
+}
+
+.layer-panel__context-menu {
+  position: fixed;
+  z-index: 40;
+  width: 200px;
+  border: 1px solid #8d8d8d;
+  background: #f7f7f7;
+  box-shadow: 2px 4px 12px rgba(15, 23, 42, 0.24);
+  padding: 4px;
+}
+
+.layer-panel__context-item {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.layer-panel__context-item:hover:not(:disabled) {
+  background: var(--qgis-row-active);
+}
+
+.layer-panel__context-item:disabled {
+  color: var(--qgis-muted);
 }
 
 .layer-panel__name,

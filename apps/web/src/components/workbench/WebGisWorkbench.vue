@@ -379,6 +379,21 @@ function restorePreviousVisibleLayers() {
   workspace.restorePreviousVisibleLayers();
 }
 
+function findLayerLabel(layerId: string) {
+  const layer = layers.value.find((item) => item.id === layerId);
+  return layer ? `${layer.schema}.${layer.table}` : "未知图层";
+}
+
+function zoomToLayer(layerId: string) {
+  workspace.setActiveLayer(layerId);
+  workspace.setStatus(`缩放到图层暂未接入地图视图：${findLayerLabel(layerId)}`, "warning");
+}
+
+function openAttributeTable(layerId: string) {
+  workspace.setActiveLayer(layerId);
+  workspace.setStatus(`属性表面板尚未纳入 V1：${findLayerLabel(layerId)}`, "warning");
+}
+
 function validateActiveLayer() {
   const layer = activeLayer.value;
   if (!layer) {
@@ -474,9 +489,13 @@ function validateActiveLayer() {
           :active-layer-id="activeLayerId"
           :visible-layer-ids="visibleLayerIds"
           :editable-layer-count="editableLayerCount"
+          :can-restore-visible-layer-ids="canRestoreVisibleLayerIds"
           @select="workspace.setActiveLayer"
           @toggle="workspace.toggleLayer"
           @solo="workspace.showOnlyLayer"
+          @restore-visibility="workspace.restorePreviousVisibleLayers"
+          @zoom-to-layer="zoomToLayer"
+          @open-attribute-table="openAttributeTable"
           @update-style="workspace.updateLayerStyle"
         />
       </aside>
