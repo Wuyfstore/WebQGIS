@@ -19,6 +19,8 @@ import type { DrawEvent } from "ol/interaction/Draw";
 import type { SelectEvent } from "ol/interaction/Select";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
 
+export type MapTool = "select" | "pan" | "zoom" | "identify" | "node" | "draw";
+
 type UseOpenLayersEditorOptions = {
   mapElement: Ref<HTMLDivElement | null>;
   layers: Ref<LayerRegistration[]>;
@@ -33,7 +35,9 @@ type UseOpenLayersEditorOptions = {
 export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const map = shallowRef<OlMap | null>(null);
   const drawMode = shallowRef<GeometryMode>("Point");
+  const activeTool = shallowRef<MapTool>("select");
   const isDrawing = shallowRef(false);
+  const isSnapEnabled = shallowRef(true);
   const layerMap = new globalThis.Map<string, TileLayer<VectorTileSource>>();
   const { isRevealed: isDeleteDialogOpen, reveal, confirm, cancel } = useConfirmDialog();
 
@@ -75,6 +79,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     map.value.addInteraction(selectInteraction);
     map.value.addInteraction(modifyInteraction);
     map.value.addInteraction(snapInteraction);
+    modifyInteraction.setActive(false);
     selectInteraction.on("select", handleMapSelect);
     modifyInteraction.on("modifyend", updateDraftGeometry);
   }
@@ -154,6 +159,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     const sourceFeature = await options.readFeature(pk);
     if (sourceFeature) {
       loadEditableFeature(sourceFeature);
+      if (activeTool.value === "identify") {
+        options.setStatus(`已识别要素 ${pk}`, "success");
+      }
     }
   }
 
@@ -186,7 +194,10 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     stopDrawing();
   }
 
-  function startDrawing() {
+  function startDrawing(mode?: GeometryMode) {
+    if (mode) {
+      drawMode.value = mode;
+    }
     const layer = options.activeLayer.value;
     if (!map.value || !layer?.editable) {
       options.setStatus("当前图层不可编辑", "warning");
@@ -194,6 +205,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     stopDrawing();
     clearDraft();
+    activeTool.value = "draw";
+    selectInteraction?.setActive(false);
+    modifyInteraction?.setActive(false);
     isDrawing.value = true;
     drawInteraction = new Draw({
       source: editSource,
@@ -204,6 +218,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       editSource.addFeature(event.feature);
       window.setTimeout(updateDraftGeometry, 0);
       stopDrawing();
+      activateTool("node");
     });
     map.value.addInteraction(drawInteraction);
     options.setStatus(`开始绘制 ${drawMode.value}`, "neutral");
@@ -215,6 +230,48 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       map.value.removeInteraction(drawInteraction);
     }
     drawInteraction = null;
+  }
+
+  function activateTool(tool: MapTool) {
+    stopDrawing();
+    activeTool.value = tool;
+    selectInteraction?.setActive(tool === "select" || tool === "identify");
+    modifyInteraction?.setActive(tool === "node");
+
+    if (tool === "select") {
+      options.setStatus("选择工具已启用：点击地图要素读取原始 geometry", "neutral");
+    } else if (tool === "pan") {
+      options.setStatus("平移工具已启用：拖拽地图移动视图", "neutral");
+    } else if (tool === "zoom") {
+      zoomIn();
+    } else if (tool === "identify") {
+      options.setStatus("识别工具已启用：点击要素查看属性", "neutral");
+    } else if (tool === "node") {
+      options.setStatus(
+        editSource.getFeatures().length > 0 ? "节点编辑已启用：拖动节点修改草稿" : "请先选择或绘制要素，再进行节点编辑",
+        editSource.getFeatures().length > 0 ? "neutral" : "warning"
+      );
+    }
+  }
+
+  function zoomIn() {
+    const view = map.value?.getView();
+    if (!view) {
+      options.setStatus("地图尚未初始化", "warning");
+      return;
+    }
+    activeTool.value = "zoom";
+    view.animate({
+      zoom: (view.getZoom() ?? 5) + 1,
+      duration: 180
+    });
+    options.setStatus("已放大地图视图", "success");
+  }
+
+  function toggleSnap() {
+    isSnapEnabled.value = !isSnapEnabled.value;
+    snapInteraction?.setActive(isSnapEnabled.value);
+    options.setStatus(isSnapEnabled.value ? "吸附已开启：顶点 + 线段" : "吸附已关闭", "success");
   }
 
   function refreshLayer(layerId?: string) {
@@ -243,13 +300,18 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   return {
     map,
     drawMode,
+    activeTool,
     isDrawing,
+    isSnapEnabled,
     isDeleteDialogOpen,
     initializeMap,
     loadEditableFeature,
     clearDraft,
     startDrawing,
     stopDrawing,
+    activateTool,
+    toggleSnap,
+    zoomIn,
     refreshLayer,
     requestDeleteConfirmation,
     confirmDelete: () => confirm(true),

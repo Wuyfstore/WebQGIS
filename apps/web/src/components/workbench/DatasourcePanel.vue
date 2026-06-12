@@ -25,6 +25,7 @@ const contextMenuStyle = computed(() => ({
   left: `${contextMenu.value.x}px`,
   top: `${contextMenu.value.y}px`
 }));
+const datasourceCountLabel = computed(() => `${props.datasources.length} 个连接`);
 
 function openContextMenu(event: MouseEvent) {
   event.preventDefault();
@@ -86,10 +87,11 @@ onBeforeUnmount(() => {
         type="button"
         title="右键新建 PostGIS 连接"
         @contextmenu="openContextMenu"
-        @dblclick="openConnectionDialog"
+        @click="openConnectionDialog"
       >
         <FolderOpened class="datasource-panel__node-icon" />
         <span>▾ PostgreSQL</span>
+        <span class="datasource-panel__root-meta">{{ datasourceCountLabel }}</span>
       </button>
       <button
         v-for="datasource in datasources"
@@ -296,8 +298,9 @@ onBeforeUnmount(() => {
 }
 
 .datasource-panel__tree-node--root {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   font-weight: 600;
-  cursor: default;
+  cursor: pointer;
 }
 
 .datasource-panel__tree-node--source {
@@ -317,11 +320,18 @@ onBeforeUnmount(() => {
 }
 
 .datasource-panel__source-name,
-.datasource-panel__source-meta {
+.datasource-panel__source-meta,
+.datasource-panel__root-meta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.datasource-panel__root-meta {
+  color: var(--qgis-muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .datasource-panel__source-meta {

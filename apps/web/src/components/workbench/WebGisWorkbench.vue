@@ -16,13 +16,14 @@ import {
   RefreshLeft,
   Search
 } from "@element-plus/icons-vue";
-import { computed, nextTick, onMounted, shallowRef } from "vue";
+import { computed, nextTick, onMounted, shallowRef, type Component } from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
 import MapCanvas from "./MapCanvas.vue";
 import EditInspector from "./EditInspector.vue";
 import { useOpenLayersEditor } from "../../composables/useOpenLayersEditor";
 import { useWebGisWorkspace } from "../../composables/useWebGisWorkspace";
+import { getGeometryModes } from "../../utils/layer";
 
 const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
@@ -55,7 +56,9 @@ const {
 } = workspace;
 const {
   drawMode,
+  activeTool,
   isDrawing,
+  isSnapEnabled,
   isDeleteDialogOpen
 } = editor;
 
@@ -70,23 +73,143 @@ const activeLayerLabel = computed(() => (
   activeLayer.value ? `${activeLayer.value.schema}.${activeLayer.value.table}` : "未选择"
 ));
 const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
-const menuItems = ["项目", "编辑", "视图", "图层", "设置", "插件", "矢量", "数据库", "网络", "帮助"];
-const toolbarItems = [
-  { label: "新建", icon: DocumentAdd },
-  { label: "保存", icon: DocumentChecked },
-  { label: "撤销", icon: RefreshLeft },
-  { label: "选择", icon: Pointer, active: true },
-  { label: "平移", icon: Rank },
-  { label: "缩放", icon: Search },
-  { label: "识别", icon: Aim },
-  { label: "点", icon: Location },
-  { label: "线", icon: Minus },
-  { label: "面", icon: Crop },
-  { label: "节点", icon: EditPen },
-  { label: "吸附", icon: Link, active: true },
-  { label: "校验", icon: CircleCheck },
-  { label: "刷新", icon: Refresh }
+const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
+const menuItems = [
+  { label: "项目", status: "项目菜单已聚焦：当前版本支持新建草稿、保存和刷新工作区" },
+  { label: "编辑", status: "编辑菜单已聚焦：可使用选择、绘制、节点编辑和删除工具" },
+  { label: "视图", status: "视图菜单已聚焦：可使用平移、缩放和图层可见性" },
+  { label: "图层", status: "图层菜单已聚焦：可选择图层、切换显示并编辑样式" },
+  { label: "设置", status: "设置菜单已聚焦：PostGIS 连接参数在浏览器面板中维护" },
+  { label: "插件", status: "插件菜单已聚焦：插件系统尚未启用" },
+  { label: "矢量", status: "矢量菜单已聚焦：当前版本通过 PostGIS 图层直接编辑矢量要素" },
+  { label: "数据库", status: "数据库菜单已聚焦：右键 PostgreSQL 可新建 PostGIS 连接" },
+  { label: "网络", status: "网络菜单已聚焦：当前地图浏览链路使用 MVT" },
+  { label: "帮助", status: "帮助菜单已聚焦：底部状态栏会显示当前工具反馈" }
 ];
+
+type ToolbarItem = {
+  label: string;
+  icon: Component;
+  title: string;
+  active: boolean;
+  disabled: boolean;
+  action: () => void | Promise<void>;
+};
+
+const toolbarItems = computed<ToolbarItem[]>(() => [
+  {
+    label: "新建",
+    icon: DocumentAdd,
+    title: "新建编辑草稿",
+    active: false,
+    disabled: busy.value,
+    action: handleNewDraft
+  },
+  {
+    label: "保存",
+    icon: DocumentChecked,
+    title: "保存当前编辑",
+    active: false,
+    disabled: busy.value || !hasDraftGeometry.value,
+    action: handleSaveFeature
+  },
+  {
+    label: "撤销",
+    icon: RefreshLeft,
+    title: "撤销当前草稿",
+    active: false,
+    disabled: busy.value || (!hasDraftGeometry.value && !hasSelectedFeature.value),
+    action: handleClearDraft
+  },
+  {
+    label: "选择",
+    icon: Pointer,
+    title: "选择要素",
+    active: activeTool.value === "select",
+    disabled: busy.value,
+    action: () => editor.activateTool("select")
+  },
+  {
+    label: "平移",
+    icon: Rank,
+    title: "平移地图",
+    active: activeTool.value === "pan",
+    disabled: busy.value,
+    action: () => editor.activateTool("pan")
+  },
+  {
+    label: "缩放",
+    icon: Search,
+    title: "放大地图",
+    active: activeTool.value === "zoom",
+    disabled: busy.value,
+    action: () => editor.activateTool("zoom")
+  },
+  {
+    label: "识别",
+    icon: Aim,
+    title: "识别要素属性",
+    active: activeTool.value === "identify",
+    disabled: busy.value,
+    action: () => editor.activateTool("identify")
+  },
+  {
+    label: "点",
+    icon: Location,
+    title: "绘制点要素",
+    active: activeTool.value === "draw" && drawMode.value === "Point",
+    disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point"),
+    action: () => editor.startDrawing("Point")
+  },
+  {
+    label: "线",
+    icon: Minus,
+    title: "绘制线要素",
+    active: activeTool.value === "draw" && drawMode.value === "LineString",
+    disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString"),
+    action: () => editor.startDrawing("LineString")
+  },
+  {
+    label: "面",
+    icon: Crop,
+    title: "绘制面要素",
+    active: activeTool.value === "draw" && drawMode.value === "Polygon",
+    disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon"),
+    action: () => editor.startDrawing("Polygon")
+  },
+  {
+    label: "节点",
+    icon: EditPen,
+    title: "节点编辑",
+    active: activeTool.value === "node",
+    disabled: busy.value,
+    action: () => editor.activateTool("node")
+  },
+  {
+    label: "吸附",
+    icon: Link,
+    title: "切换吸附",
+    active: isSnapEnabled.value,
+    disabled: busy.value,
+    action: editor.toggleSnap
+  },
+  {
+    label: "校验",
+    icon: CircleCheck,
+    title: "校验当前图层编辑状态",
+    active: false,
+    disabled: busy.value,
+    action: validateActiveLayer
+  },
+  {
+    label: "刷新",
+    icon: Refresh,
+    title: "刷新数据源和图层",
+    active: false,
+    disabled: busy.value,
+    action: handleRefreshAll
+  }
+]);
 
 onMounted(async () => {
   await nextTick();
@@ -96,6 +219,15 @@ onMounted(async () => {
 function handleMapReady(element: HTMLDivElement) {
   mapElement.value = element;
   editor.initializeMap();
+}
+
+function handleMenuAction(statusText: string) {
+  workspace.setStatus(statusText, "neutral");
+}
+
+function handleNewDraft() {
+  handleClearDraft();
+  workspace.setStatus("已新建空白编辑草稿，请选择绘制工具开始采集", "success");
 }
 
 async function handleSaveFeature() {
@@ -122,6 +254,24 @@ function handleClearDraft() {
   workspace.clearDraftState();
   editor.clearDraft();
 }
+
+async function handleRefreshAll() {
+  await workspace.refreshAll();
+  editor.refreshLayer(activeLayer.value?.id);
+}
+
+function validateActiveLayer() {
+  const layer = activeLayer.value;
+  if (!layer) {
+    workspace.setStatus("请先选择一个图层再执行校验", "warning");
+    return;
+  }
+  if (!layer.editable) {
+    workspace.setStatus(`当前图层只读：${layer.editableReason.join("；") || "缺少可编辑条件"}`, "warning");
+    return;
+  }
+  workspace.setStatus(`校验通过：${layer.schema}.${layer.table} 可编辑`, "success");
+}
 </script>
 
 <template>
@@ -129,8 +279,14 @@ function handleClearDraft() {
     <header class="workbench__menubar">
       <strong class="workbench__brand">WebQGIS</strong>
       <nav class="workbench__menu" aria-label="应用菜单">
-        <button v-for="item in menuItems" :key="item" class="workbench__menu-item focus-ring" type="button">
-          {{ item }}
+        <button
+          v-for="item in menuItems"
+          :key="item.label"
+          class="workbench__menu-item focus-ring"
+          type="button"
+          @click="handleMenuAction(item.status)"
+        >
+          {{ item.label }}
         </button>
       </nav>
       <span class="workbench__connection">PostgreSQL: Local PostGIS / public</span>
@@ -142,14 +298,16 @@ function handleClearDraft() {
         :key="item.label"
         class="workbench__tool focus-ring"
         :class="{ 'workbench__tool--active': item.active }"
+        :disabled="item.disabled"
         type="button"
-        :title="item.label"
+        :title="item.title"
+        @click="item.action"
       >
         <component :is="item.icon" class="workbench__tool-icon" aria-hidden="true" />
         <span class="workbench__tool-label">{{ item.label }}</span>
       </button>
       <span class="workbench__separator"></span>
-      <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="busy" type="button" @click="workspace.refreshAll">
+      <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="busy" type="button" @click="handleRefreshAll">
         <FolderOpened class="workbench__tool-icon" aria-hidden="true" />
         刷新图层
       </button>
