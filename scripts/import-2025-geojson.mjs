@@ -23,6 +23,10 @@ function quoteIdent(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
+function quoteLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 function normalizeText(value) {
   if (value === undefined || value === null) {
     return null;
@@ -45,8 +49,8 @@ async function importDataset(client, dataset) {
     await client.query(`
       create table public.${quoteIdent(dataset.table)} (
         id bigserial primary key,
-        source_file text not null,
-        admin_level text not null,
+        source_file text not null default ${quoteLiteral(dataset.file)},
+        admin_level text not null default ${quoteLiteral(dataset.adminLevel)},
         name text,
         gb text,
         properties jsonb not null default '{}'::jsonb,
