@@ -18,6 +18,7 @@ import type { Geometry } from "ol/geom";
 import type { FeatureLike } from "ol/Feature";
 import type { DrawEvent } from "ol/interaction/Draw";
 import type { EventsKey } from "ol/events";
+import type { Pixel } from "ol/pixel";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
 
 export type MapTool = "select" | "pan" | "zoom" | "identify" | "node" | "draw";
@@ -164,12 +165,21 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     if (activeTool.value !== "select" && activeTool.value !== "identify") {
       return;
     }
-    const feature = map.value?.forEachFeatureAtPixel(
-      event.pixel,
-      (candidate) => candidate,
-      { hitTolerance: 6 }
-    );
+    const activeTileLayer = options.activeLayer.value ? layerMap.get(options.activeLayer.value.id) : undefined;
+    const feature = pickFeatureAtPixel(event.pixel, activeTileLayer)
+      ?? pickFeatureAtPixel(event.pixel);
     void handleFeaturePick(feature);
+  }
+
+  function pickFeatureAtPixel(pixel: Pixel, preferredLayer?: TileLayer<VectorTileSource>) {
+    return map.value?.forEachFeatureAtPixel(
+      pixel,
+      (candidate) => candidate,
+      {
+        hitTolerance: 6,
+        layerFilter: preferredLayer ? (layer) => layer === preferredLayer : undefined
+      }
+    );
   }
 
   async function handleFeaturePick(feature?: FeatureLike) {

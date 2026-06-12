@@ -25,6 +25,9 @@ export function isNumericField(dataType: string): boolean {
 
 export function getGeometryModes(layer?: LayerRegistration): Array<"Point" | "LineString" | "Polygon"> {
   const type = layer?.geometryType.toUpperCase() ?? "";
+  if (type === "GEOMETRY") {
+    return ["Point", "LineString", "Polygon"];
+  }
   if (type.includes("POINT")) {
     return ["Point"];
   }

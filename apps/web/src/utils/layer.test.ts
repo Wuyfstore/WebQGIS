@@ -77,6 +77,7 @@ describe("layer utilities", () => {
   });
 
   it("limits draw modes to the active geometry family", () => {
+    expect(getGeometryModes(createLayer({ geometryType: "GEOMETRY" }))).toEqual(["Point", "LineString", "Polygon"]);
     expect(getGeometryModes(createLayer({ geometryType: "MULTIPOINT" }))).toEqual(["Point"]);
     expect(getGeometryModes(createLayer({ geometryType: "LINESTRING" }))).toEqual(["LineString"]);
     expect(getGeometryModes(createLayer({ geometryType: "MULTIPOLYGON" }))).toEqual(["Polygon"]);

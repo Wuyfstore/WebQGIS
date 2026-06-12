@@ -34,6 +34,7 @@ type FieldRow = {
 };
 
 const supportedGeometryTypes = new Set<GeometryKind>([
+  "GEOMETRY",
   "POINT",
   "MULTIPOINT",
   "LINESTRING",

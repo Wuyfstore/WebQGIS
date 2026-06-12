@@ -1,6 +1,7 @@
 import type { PoolConfig } from "pg";
 
 export type GeometryKind =
+  | "GEOMETRY"
   | "POINT"
   | "MULTIPOINT"
   | "LINESTRING"
