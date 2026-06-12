@@ -23,6 +23,7 @@ import MapCanvas from "./MapCanvas.vue";
 import EditInspector from "./EditInspector.vue";
 import { useOpenLayersEditor } from "../../composables/useOpenLayersEditor";
 import { useWebGisWorkspace } from "../../composables/useWebGisWorkspace";
+import type { GeometryMode } from "../../types/gis";
 import { getGeometryModes } from "../../utils/layer";
 
 const workspace = useWebGisWorkspace();
@@ -38,6 +39,7 @@ const editor = useOpenLayersEditor({
   selectedFeatureId: workspace.selectedFeatureId,
   draftGeometry: workspace.draftGeometry,
   readFeature: workspace.readFeature,
+  clearSelection: workspace.clearDraftState,
   setStatus: workspace.setStatus
 });
 
@@ -127,9 +129,9 @@ const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
     { label: "插件系统尚未纳入 V1", action: () => workspace.setStatus("插件系统不在 V1 范围内", "warning"), disabled: false }
   ],
   矢量: [
-    { label: "绘制点", action: () => editor.startDrawing("Point"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point") },
-    { label: "绘制线", action: () => editor.startDrawing("LineString"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString") },
-    { label: "绘制面", action: () => editor.startDrawing("Polygon"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon") }
+    { label: "绘制点", action: () => startDrawing("Point"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point") },
+    { label: "绘制线", action: () => startDrawing("LineString"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString") },
+    { label: "绘制面", action: () => startDrawing("Polygon"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon") }
   ],
   数据库: [
     { label: "新建 PostgreSQL 连接...", action: requestDatasourceConnectionDialog, disabled: busy.value },
@@ -218,7 +220,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     title: "绘制点要素",
     active: activeTool.value === "draw" && drawMode.value === "Point",
     disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point"),
-    action: () => editor.startDrawing("Point")
+    action: () => startDrawing("Point")
   },
   {
     label: "线",
@@ -226,7 +228,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     title: "绘制线要素",
     active: activeTool.value === "draw" && drawMode.value === "LineString",
     disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString"),
-    action: () => editor.startDrawing("LineString")
+    action: () => startDrawing("LineString")
   },
   {
     label: "面",
@@ -234,7 +236,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     title: "绘制面要素",
     active: activeTool.value === "draw" && drawMode.value === "Polygon",
     disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon"),
-    action: () => editor.startDrawing("Polygon")
+    action: () => startDrawing("Polygon")
   },
   {
     label: "节点",
@@ -320,6 +322,11 @@ async function handleDeleteFeature() {
 function handleClearDraft() {
   workspace.clearDraftState();
   editor.clearDraft();
+}
+
+function startDrawing(mode?: GeometryMode) {
+  workspace.clearDraftState();
+  editor.startDrawing(mode);
 }
 
 async function handleRefreshAll() {
@@ -460,7 +467,7 @@ function validateActiveLayer() {
         :has-selected-feature="hasSelectedFeature"
         :is-drawing="isDrawing"
         @ready="handleMapReady"
-        @draw="editor.startDrawing"
+        @draw="startDrawing"
         @save="handleSaveFeature"
         @delete="handleDeleteFeature"
         @clear="handleClearDraft"

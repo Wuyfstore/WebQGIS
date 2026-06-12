@@ -10,9 +10,8 @@ import TileLayer from "ol/layer/VectorTile";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import VectorTileSource from "ol/source/VectorTile";
-import { Modify, Select, Snap, Draw } from "ol/interaction";
+import { Modify, Snap, Draw } from "ol/interaction";
 import { unByKey } from "ol/Observable";
-import { click } from "ol/events/condition";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { fromLonLat } from "ol/proj";
 import type { Geometry } from "ol/geom";
@@ -43,6 +42,7 @@ type UseOpenLayersEditorOptions = {
   selectedFeatureId: Ref<string | null>;
   draftGeometry: Ref<unknown>;
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
+  clearSelection?: () => void;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
 };
 
@@ -55,7 +55,6 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const layerMap = new globalThis.Map<string, TileLayer<VectorTileSource>>();
   const { isRevealed: isDeleteDialogOpen, reveal, confirm, cancel } = useConfirmDialog();
 
-  let selectInteraction: Select | null = null;
   let modifyInteraction: Modify | null = null;
   let snapInteraction: Snap | null = null;
   let drawInteraction: Draw | null = null;
@@ -88,10 +87,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       })
     });
 
-    selectInteraction = new Select({ condition: click, layers: () => true });
     modifyInteraction = new Modify({ source: editSource });
     snapInteraction = new Snap({ source: editSource });
-    map.value.addInteraction(selectInteraction);
     map.value.addInteraction(modifyInteraction);
     map.value.addInteraction(snapInteraction);
     modifyInteraction.setActive(false);
@@ -250,8 +247,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     stopDrawing();
     clearDraft();
+    options.clearSelection?.();
     activeTool.value = "draw";
-    selectInteraction?.setActive(false);
     modifyInteraction?.setActive(false);
     isDrawing.value = true;
     drawInteraction = new Draw({
@@ -260,10 +257,11 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     });
     drawInteraction.on("drawend", (event: DrawEvent) => {
       editSource.clear();
-      editSource.addFeature(event.feature);
-      window.setTimeout(updateDraftGeometry, 0);
-      stopDrawing();
-      activateTool("node");
+      window.setTimeout(() => {
+        updateDraftGeometry();
+        stopDrawing();
+        activateTool("node");
+      }, 0);
     });
     map.value.addInteraction(drawInteraction);
     options.setStatus(`开始绘制 ${drawMode.value}`, "neutral");
@@ -280,7 +278,6 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   function activateTool(tool: MapTool) {
     stopDrawing();
     activeTool.value = tool;
-    selectInteraction?.setActive(tool === "select" || tool === "identify");
     modifyInteraction?.setActive(tool === "node");
 
     if (tool === "select") {
