@@ -32,7 +32,7 @@ const sampleLayers: LayerRegistration[] = [
       pointRadius: 5,
       opacity: 0.6
     },
-    extent: null,
+    extent: [73.5, 18, 135.1, 53.6],
     updatedAt: "2026-06-12T00:00:00.000Z"
   },
   {
@@ -61,7 +61,7 @@ const sampleLayers: LayerRegistration[] = [
       pointRadius: 5,
       opacity: 0.6
     },
-    extent: null,
+    extent: [100, 20, 110, 30],
     updatedAt: "2026-06-12T00:00:00.000Z"
   }
 ];
@@ -80,6 +80,7 @@ const editorMock = {
   activateTool: vi.fn(),
   toggleSnap: vi.fn(),
   zoomIn: vi.fn(),
+  zoomToLayerExtent: vi.fn(() => true),
   refreshLayer: vi.fn(),
   requestDeleteConfirmation: vi.fn(async () => false),
   confirmDelete: vi.fn(),
@@ -111,6 +112,7 @@ describe("WebGisWorkbench", () => {
     editorMock.isDrawing.value = false;
     editorMock.isSnapEnabled.value = true;
     editorMock.isDeleteDialogOpen.value = false;
+    editorMock.zoomToLayerExtent.mockReturnValue(true);
   });
 
   it("renders the QGIS-style shell without crashing on first entry", () => {
@@ -317,7 +319,7 @@ describe("WebGisWorkbench", () => {
     await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[2].click();
     await flushPromises();
 
-    expect(wrapper.text()).toContain("缩放到图层暂未接入地图视图：public.china_2025_city");
+    expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
 
     await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
       clientX: 160,

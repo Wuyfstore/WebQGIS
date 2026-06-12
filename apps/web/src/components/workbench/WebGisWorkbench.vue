@@ -386,7 +386,7 @@ function findLayerLabel(layerId: string) {
 
 function zoomToLayer(layerId: string) {
   workspace.setActiveLayer(layerId);
-  workspace.setStatus(`缩放到图层暂未接入地图视图：${findLayerLabel(layerId)}`, "warning");
+  editor.zoomToLayerExtent(layerId);
 }
 
 function openAttributeTable(layerId: string) {

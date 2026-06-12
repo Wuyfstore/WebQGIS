@@ -13,7 +13,7 @@ import VectorTileSource from "ol/source/VectorTile";
 import { Modify, Snap, Draw } from "ol/interaction";
 import { unByKey } from "ol/Observable";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
-import { fromLonLat } from "ol/proj";
+import { fromLonLat, transformExtent } from "ol/proj";
 import type { Geometry } from "ol/geom";
 import type { FeatureLike } from "ol/Feature";
 import type { DrawEvent } from "ol/interaction/Draw";
@@ -33,6 +33,13 @@ export function readVectorTileFeaturePk(feature: Pick<FeatureLike, "get" | "getI
     return null;
   }
   return String(pk);
+}
+
+export function projectLayerExtent(extent: LayerRegistration["extent"]) {
+  if (!extent) {
+    return null;
+  }
+  return transformExtent(extent, "EPSG:4326", "EPSG:3857");
 }
 
 type UseOpenLayersEditorOptions = {
@@ -320,6 +327,32 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     options.setStatus("已放大地图视图", "success");
   }
 
+  function zoomToLayerExtent(layerId: string) {
+    const view = map.value?.getView();
+    if (!view) {
+      options.setStatus("地图尚未初始化", "warning");
+      return false;
+    }
+    const layer = options.layers.value.find((item) => item.id === layerId);
+    if (!layer) {
+      options.setStatus("未找到要缩放的图层", "warning");
+      return false;
+    }
+    const extent = projectLayerExtent(layer.extent);
+    if (!extent) {
+      options.setStatus(`图层缺少范围信息：${layer.schema}.${layer.table}`, "warning");
+      return false;
+    }
+    view.fit(extent, {
+      duration: 220,
+      padding: [48, 48, 48, 48],
+      maxZoom: 13
+    });
+    activeTool.value = "pan";
+    options.setStatus(`已缩放到图层：${layer.schema}.${layer.table}`, "success");
+    return true;
+  }
+
   function toggleSnap() {
     isSnapEnabled.value = !isSnapEnabled.value;
     snapInteraction?.setActive(isSnapEnabled.value);
@@ -364,6 +397,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     activateTool,
     toggleSnap,
     zoomIn,
+    zoomToLayerExtent,
     refreshLayer,
     requestDeleteConfirmation,
     confirmDelete: () => confirm(true),
