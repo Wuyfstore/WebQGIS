@@ -21,13 +21,38 @@ const editor = useOpenLayersEditor({
   setStatus: workspace.setStatus
 });
 
+const {
+  datasources,
+  layers,
+  activeLayerId,
+  activeLayer,
+  visibleLayerIds,
+  busy,
+  status,
+  selectedFeatureId,
+  selectedProperties,
+  datasourceForm,
+  editableFields,
+  selectedLayerStatus,
+  editableLayerCount
+} = workspace;
+const {
+  drawMode,
+  isDrawing,
+  isDeleteDialogOpen
+} = editor;
+
 const hasDraftGeometry = computed(() => Boolean(workspace.draftGeometry.value));
-const hasSelectedFeature = computed(() => Boolean(workspace.selectedFeatureId.value));
+const hasSelectedFeature = computed(() => Boolean(selectedFeatureId.value));
 const statusClasses = computed(() => ({
-  "workbench__status--success": workspace.status.value.tone === "success",
-  "workbench__status--warning": workspace.status.value.tone === "warning",
-  "workbench__status--danger": workspace.status.value.tone === "danger"
+  "workbench__status--success": status.value.tone === "success",
+  "workbench__status--warning": status.value.tone === "warning",
+  "workbench__status--danger": status.value.tone === "danger"
 }));
+const activeLayerLabel = computed(() => (
+  activeLayer.value ? `${activeLayer.value.schema}.${activeLayer.value.table}` : "未选择"
+));
+const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
 const menuItems = ["项目", "编辑", "视图", "图层", "设置", "插件", "矢量", "数据库", "网络", "帮助"];
 const toolbarItems = [
   { label: "新建", icon: "doc" },
@@ -60,7 +85,7 @@ async function handleSaveFeature() {
   const saved = await workspace.saveFeature();
   if (saved) {
     editor.loadEditableFeature(saved);
-    editor.refreshLayer(workspace.activeLayer.value?.id);
+    editor.refreshLayer(activeLayer.value?.id);
   }
 }
 
@@ -72,7 +97,7 @@ async function handleDeleteFeature() {
   const deleted = await workspace.deleteSelectedFeature();
   if (deleted) {
     editor.clearDraft();
-    editor.refreshLayer(workspace.activeLayer.value?.id);
+    editor.refreshLayer(activeLayer.value?.id);
   }
 }
 
@@ -107,16 +132,16 @@ function handleClearDraft() {
         <span class="workbench__tool-label">{{ item.label }}</span>
       </button>
       <span class="workbench__separator"></span>
-      <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="workspace.busy.value" type="button" @click="workspace.refreshAll">
+      <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="busy" type="button" @click="workspace.refreshAll">
         刷新图层
       </button>
     </section>
 
     <section class="workbench__contextbar" aria-label="编辑上下文">
       <span class="workbench__context-label">活动图层:</span>
-      <span class="workbench__context-field">{{ workspace.activeLayer.value ? `${workspace.activeLayer.value.schema}.${workspace.activeLayer.value.table}` : "未选择" }}</span>
+      <span class="workbench__context-field">{{ activeLayerLabel }}</span>
       <span class="workbench__context-label">编辑:</span>
-      <span class="workbench__context-badge">{{ workspace.activeLayer.value?.editable ? "开启" : "只读" }}</span>
+      <span class="workbench__context-badge">{{ activeLayerEditStatus }}</span>
       <span class="workbench__context-label">捕捉:</span>
       <span class="workbench__context-field">顶点 + 线段, 8 px</span>
       <span class="workbench__context-note">显示链路: MVT</span>
@@ -126,18 +151,18 @@ function handleClearDraft() {
     <section class="workbench__body">
       <aside class="workbench__left-dock" aria-label="浏览器与图层">
         <DatasourcePanel
-          :datasources="workspace.datasources.value"
-          :form="workspace.datasourceForm"
-          :busy="workspace.busy.value"
+          :datasources="datasources"
+          :form="datasourceForm"
+          :busy="busy"
           @save="workspace.saveDatasource"
           @scan="workspace.scanDatasource"
         />
 
         <LayerPanel
-          :layers="workspace.layers.value"
-          :active-layer-id="workspace.activeLayerId.value"
-          :visible-layer-ids="workspace.visibleLayerIds.value"
-          :editable-layer-count="workspace.editableLayerCount.value"
+          :layers="layers"
+          :active-layer-id="activeLayerId"
+          :visible-layer-ids="visibleLayerIds"
+          :editable-layer-count="editableLayerCount"
           @select="workspace.setActiveLayer"
           @toggle="workspace.toggleLayer"
           @update-style="workspace.updateLayerStyle"
@@ -145,12 +170,12 @@ function handleClearDraft() {
       </aside>
 
       <MapCanvas
-        v-model:draw-mode="editor.drawMode.value"
-        :active-layer="workspace.activeLayer.value"
-        :busy="workspace.busy.value"
+        v-model:draw-mode="drawMode"
+        :active-layer="activeLayer"
+        :busy="busy"
         :has-draft-geometry="hasDraftGeometry"
         :has-selected-feature="hasSelectedFeature"
-        :is-drawing="editor.isDrawing.value"
+        :is-drawing="isDrawing"
         @ready="handleMapReady"
         @draw="editor.startDrawing"
         @save="handleSaveFeature"
@@ -159,11 +184,11 @@ function handleClearDraft() {
       />
 
       <EditInspector
-        v-model:selected-properties="workspace.selectedProperties.value"
-        :active-layer="workspace.activeLayer.value"
-        :editable-fields="workspace.editableFields.value"
-        :selected-layer-status="workspace.selectedLayerStatus.value"
-        :selected-feature-id="workspace.selectedFeatureId.value"
+        v-model:selected-properties="selectedProperties"
+        :active-layer="activeLayer"
+        :editable-fields="editableFields"
+        :selected-layer-status="selectedLayerStatus"
+        :selected-feature-id="selectedFeatureId"
       />
     </section>
 
@@ -172,10 +197,10 @@ function handleClearDraft() {
       <span>比例尺 1:2500</span>
       <span>EPSG:3857 显示 / EPSG:4326 数据源</span>
       <span class="workbench__statusbar-ok">捕捉: 顶点+线段 8 px</span>
-      <span :class="statusClasses" class="workbench__status" role="status">{{ workspace.status.value.text }}</span>
+      <span :class="statusClasses" class="workbench__status" role="status">{{ status.text }}</span>
     </footer>
 
-    <div v-if="editor.isDeleteDialogOpen.value" class="workbench__dialog-backdrop">
+    <div v-if="isDeleteDialogOpen" class="workbench__dialog-backdrop">
       <section class="workbench__dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
         <h2 id="delete-title" class="workbench__dialog-title">删除要素</h2>
         <p class="workbench__dialog-copy">
