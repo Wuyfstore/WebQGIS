@@ -18,6 +18,7 @@ import {
 } from "@element-plus/icons-vue";
 import { computed, nextTick, onMounted, shallowRef, type Component } from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
+import AttributeTablePanel from "./AttributeTablePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
 import MapCanvas from "./MapCanvas.vue";
 import EditInspector from "./EditInspector.vue";
@@ -30,6 +31,7 @@ const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
+const attributeTableLayerId = shallowRef<string | null>(null);
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -78,6 +80,9 @@ const activeLayerLabel = computed(() => (
   activeLayer.value ? `${activeLayer.value.schema}.${activeLayer.value.table}` : "未选择"
 ));
 const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
+const attributeTableLayer = computed(() => (
+  layers.value.find((layer) => layer.id === attributeTableLayerId.value) ?? null
+));
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
 const menuItems = [
   "项目",
@@ -391,7 +396,12 @@ function zoomToLayer(layerId: string) {
 
 function openAttributeTable(layerId: string) {
   workspace.setActiveLayer(layerId);
-  workspace.setStatus(`属性表面板尚未纳入 V1：${findLayerLabel(layerId)}`, "warning");
+  attributeTableLayerId.value = layerId;
+  workspace.setStatus(`已打开属性表：${findLayerLabel(layerId)}`, "success");
+}
+
+function closeAttributeTable() {
+  attributeTableLayerId.value = null;
 }
 
 function validateActiveLayer() {
@@ -547,6 +557,12 @@ function validateActiveLayer() {
         </div>
       </section>
     </div>
+
+    <AttributeTablePanel
+      v-if="attributeTableLayer"
+      :layer="attributeTableLayer"
+      @close="closeAttributeTable"
+    />
   </main>
 </template>
 

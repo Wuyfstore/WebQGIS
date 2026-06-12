@@ -15,7 +15,24 @@ const sampleLayers: LayerRegistration[] = [
     geometryType: "MultiPolygon",
     srid: 4326,
     primaryKey: "id",
-    fields: [],
+    fields: [
+      {
+        name: "id",
+        dataType: "integer",
+        udtName: "int4",
+        nullable: false,
+        defaultValue: null,
+        editable: false
+      },
+      {
+        name: "name",
+        dataType: "text",
+        udtName: "text",
+        nullable: false,
+        defaultValue: null,
+        editable: true
+      }
+    ],
     hasSpatialIndex: true,
     canSelect: true,
     canInsert: false,
@@ -44,7 +61,32 @@ const sampleLayers: LayerRegistration[] = [
     geometryType: "MultiPolygon",
     srid: 4326,
     primaryKey: "id",
-    fields: [],
+    fields: [
+      {
+        name: "id",
+        dataType: "integer",
+        udtName: "int4",
+        nullable: false,
+        defaultValue: null,
+        editable: false
+      },
+      {
+        name: "name",
+        dataType: "text",
+        udtName: "text",
+        nullable: false,
+        defaultValue: null,
+        editable: true
+      },
+      {
+        name: "adcode",
+        dataType: "integer",
+        udtName: "int4",
+        nullable: true,
+        defaultValue: null,
+        editable: true
+      }
+    ],
     hasSpatialIndex: true,
     canSelect: true,
     canInsert: true,
@@ -328,7 +370,15 @@ describe("WebGisWorkbench", () => {
     await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[3].click();
     await flushPromises();
 
-    expect(wrapper.text()).toContain("属性表面板尚未纳入 V1：public.china_2025_city");
+    expect(wrapper.text()).toContain("已打开属性表：public.china_2025_city");
+    expect(document.body.textContent).toContain("属性表 - public.china_2025_city");
+    expect(document.body.textContent).toContain("3 个字段");
+    expect(document.body.textContent).toContain("adcode");
+
+    await document.querySelector<HTMLButtonElement>(".attribute-table__close")?.click();
+    await flushPromises();
+
+    expect(document.body.textContent).not.toContain("属性表 - public.china_2025_city");
 
     wrapper.unmount();
     document.body.innerHTML = "";
