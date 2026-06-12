@@ -6,5 +6,6 @@ coverage/
 !.env.example
 data/*.json
 data/*.sqlite
+apps/api/data/*.json
 *.log
 *.tsbuildinfo

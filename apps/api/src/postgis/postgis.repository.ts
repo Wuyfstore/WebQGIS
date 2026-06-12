@@ -273,8 +273,11 @@ export class PostgisRepository implements OnApplicationShutdown {
       .filter((field) => field.name !== layer.primaryKey)
       .slice(0, 24)
       .map((field) => quoteIdent(field.name));
-    const idColumn = layer.primaryKey ? `${quoteIdent(layer.primaryKey)} as id` : "null as id";
-    const selectColumns = [idColumn, ...propertyColumns].join(", ");
+    const primaryField = layer.fields.find((field) => field.name === layer.primaryKey);
+    const canUseMvtFeatureId = Boolean(primaryField && this.isIntegerField(primaryField));
+    const featureIdColumn = canUseMvtFeatureId ? `${quoteIdent(layer.primaryKey!)}::bigint as mvt_feature_id` : "null::bigint as mvt_feature_id";
+    const idPropertyColumn = layer.primaryKey ? `${quoteIdent(layer.primaryKey)} as id` : "null as id";
+    const selectColumns = [featureIdColumn, idPropertyColumn, ...propertyColumns].join(", ");
     const result = await pool.query<{ mvt: Buffer }>(
       `
       with bounds as (
@@ -296,7 +299,7 @@ export class PostgisRepository implements OnApplicationShutdown {
           bounds.geom
         )
       )
-      select ST_AsMVT(mvtgeom.*, $4, 4096, 'geom') as mvt
+      select ST_AsMVT(mvtgeom.*, $4, 4096, 'geom', 'mvt_feature_id') as mvt
       from mvtgeom
       `,
       [z, x, y, layer.id]
@@ -399,6 +402,10 @@ export class PostgisRepository implements OnApplicationShutdown {
       pointRadius: 6,
       opacity: 0.82
     };
+  }
+
+  private isIntegerField(field: FieldMeta): boolean {
+    return ["int2", "int4", "int8"].includes(field.udtName);
   }
 
   private assertQueryableLayer(layer: LayerRegistration): void {

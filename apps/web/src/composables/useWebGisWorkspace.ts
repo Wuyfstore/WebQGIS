@@ -133,12 +133,13 @@ export function useWebGisWorkspace() {
     replaceVisibleLayerIds(nextVisible);
   }
 
-  async function readFeature(pk: string) {
-    const layer = activeLayer.value;
+  async function readFeature(layerId: string, pk: string) {
+    const layer = layers.value.find((item) => item.id === layerId);
     if (!layer?.queryable) {
       setStatus("当前图层不可查询", "warning");
       return undefined;
     }
+    activeLayerId.value = layer.id;
     return withBusy(async () => {
       const feature = await apiGet<GeoJsonFeature>(`/api/layers/${layer.id}/features/${pk}`);
       setSelectedFeature(feature, pk);

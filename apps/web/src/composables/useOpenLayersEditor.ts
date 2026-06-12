@@ -1,6 +1,7 @@
 import { onBeforeUnmount, shallowRef, watch, type Ref } from "vue";
 import { useConfirmDialog } from "@vueuse/core";
 import OlMap from "ol/Map";
+import MapBrowserEvent from "ol/MapBrowserEvent";
 import View from "ol/View";
 import Feature from "ol/Feature";
 import GeoJSON from "ol/format/GeoJSON";
@@ -10,16 +11,29 @@ import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import VectorTileSource from "ol/source/VectorTile";
 import { Modify, Select, Snap, Draw } from "ol/interaction";
+import { unByKey } from "ol/Observable";
 import { click } from "ol/events/condition";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { fromLonLat } from "ol/proj";
 import type { Geometry } from "ol/geom";
 import type { FeatureLike } from "ol/Feature";
 import type { DrawEvent } from "ol/interaction/Draw";
-import type { SelectEvent } from "ol/interaction/Select";
+import type { EventsKey } from "ol/events";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
 
 export type MapTool = "select" | "pan" | "zoom" | "identify" | "node" | "draw";
+
+const singleClickEvent = "singleclick" as const;
+
+export function readVectorTileFeaturePk(feature: Pick<FeatureLike, "get" | "getId">): string | null {
+  const rawId = typeof feature.getId === "function" ? feature.getId() : undefined;
+  const propertyId = feature.get("id");
+  const pk = rawId ?? propertyId;
+  if (pk === undefined || pk === null || pk === "") {
+    return null;
+  }
+  return String(pk);
+}
 
 type UseOpenLayersEditorOptions = {
   mapElement: Ref<HTMLDivElement | null>;
@@ -28,7 +42,7 @@ type UseOpenLayersEditorOptions = {
   visibleLayerIds: Ref<Set<string>>;
   selectedFeatureId: Ref<string | null>;
   draftGeometry: Ref<unknown>;
-  readFeature: (pk: string) => Promise<GeoJsonFeature | undefined>;
+  readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
 };
 
@@ -45,6 +59,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   let modifyInteraction: Modify | null = null;
   let snapInteraction: Snap | null = null;
   let drawInteraction: Draw | null = null;
+  let mapClickKey: EventsKey | null = null;
 
   const editSource = new VectorSource();
   const editLayer = new VectorLayer({
@@ -68,8 +83,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       target: options.mapElement.value,
       layers: [editLayer],
       view: new View({
-        center: fromLonLat([104.06, 30.67]),
-        zoom: 5
+        center: fromLonLat([104.29, 35.5]),
+        zoom: 4
       })
     });
 
@@ -80,14 +95,16 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     map.value.addInteraction(modifyInteraction);
     map.value.addInteraction(snapInteraction);
     modifyInteraction.setActive(false);
-    selectInteraction.on("select", handleMapSelect);
     modifyInteraction.on("modifyend", updateDraftGeometry);
+    mapClickKey = map.value.on(singleClickEvent, handleMapClick);
+    syncLayers();
   }
 
   function disposeMap() {
     stopDrawing();
-    if (selectInteraction) {
-      selectInteraction.un("select", handleMapSelect);
+    if (mapClickKey) {
+      unByKey(mapClickKey);
+      mapClickKey = null;
     }
     map.value?.setTarget(undefined);
     map.value = null;
@@ -119,7 +136,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     const vectorLayer = new TileLayer({
       source: new VectorTileSource({
-        format: new MVT(),
+        format: new MVT({ idProperty: layer.primaryKey ?? undefined }),
         url: layer.tileUrl
       }),
       opacity: layer.style.opacity,
@@ -131,7 +148,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   function layerStyle(layer: LayerRegistration, feature: FeatureLike) {
     const active = options.activeLayer.value?.id === layer.id;
-    const selected = String(feature.get("id")) === options.selectedFeatureId.value;
+    const selected = readVectorTileFeaturePk(feature) === options.selectedFeatureId.value;
     return new Style({
       image: new CircleStyle({
         radius: active || selected ? layer.style.pointRadius + 2 : layer.style.pointRadius,
@@ -146,19 +163,33 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     });
   }
 
-  async function handleMapSelect(event: SelectEvent) {
-    const feature = event.selected[0];
-    const layer = options.activeLayer.value;
+  function handleMapClick(event: MapBrowserEvent) {
+    if (activeTool.value !== "select" && activeTool.value !== "identify") {
+      return;
+    }
+    const feature = map.value?.forEachFeatureAtPixel(
+      event.pixel,
+      (candidate) => candidate,
+      { hitTolerance: 6 }
+    );
+    void handleFeaturePick(feature);
+  }
+
+  async function handleFeaturePick(feature?: FeatureLike) {
+    const layer = findFeatureLayer(feature);
     if (!feature || !layer?.queryable) {
+      options.setStatus("请选择可查询图层上的要素", "warning");
       return;
     }
-    const pk = String(feature.get("id"));
-    if (!pk || pk === "undefined") {
+    const pk = readVectorTileFeaturePk(feature);
+    if (!pk) {
+      options.setStatus("瓦片要素缺少主键，无法回源编辑", "warning");
       return;
     }
-    const sourceFeature = await options.readFeature(pk);
+    const sourceFeature = await options.readFeature(layer.id, pk);
     if (sourceFeature) {
       loadEditableFeature(sourceFeature);
+      options.setStatus(`已回源读取要素 ${pk}，可进行节点编辑或属性编辑`, "success");
       if (activeTool.value === "identify") {
         options.setStatus(`已识别要素 ${pk}`, "success");
       }
@@ -173,6 +204,20 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }) as Feature<Geometry>;
     editSource.addFeature(parsed);
     updateDraftGeometry();
+  }
+
+  function findFeatureLayer(feature?: FeatureLike): LayerRegistration | undefined {
+    if (!feature) {
+      return undefined;
+    }
+    const layerId = feature.get("layer");
+    if (typeof layerId === "string") {
+      const matchedLayer = options.layers.value.find((layer) => layer.id === layerId);
+      if (matchedLayer) {
+        return matchedLayer;
+      }
+    }
+    return options.activeLayer.value;
   }
 
   function updateDraftGeometry() {
