@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Close } from "@element-plus/icons-vue";
-import { computed } from "vue";
+import { useSorted } from "@vueuse/core";
+import { computed, shallowRef } from "vue";
 import type { FieldMeta, LayerRegistration } from "../../types/gis";
 
 const props = defineProps<{
@@ -11,8 +12,14 @@ const emit = defineEmits<{
   close: [];
 }>();
 
+type FieldSortKey = "name" | "type" | "nullable" | "defaultValue" | "editable";
+type SortDirection = "asc" | "desc";
+
+const fieldSearch = shallowRef("");
+const sortKey = shallowRef<FieldSortKey>("name");
+const sortDirection = shallowRef<SortDirection>("asc");
 const layerLabel = computed(() => `${props.layer.schema}.${props.layer.table}`);
-const fieldCountLabel = computed(() => `${props.layer.fields.length} 个字段`);
+const normalizedSearch = computed(() => fieldSearch.value.trim().toLowerCase());
 const extentLabel = computed(() => (
   props.layer.extent
     ? props.layer.extent.map((value) => value.toFixed(4)).join(", ")
@@ -25,6 +32,87 @@ const capabilityItems = computed(() => [
   { label: "删除", enabled: props.layer.canDelete },
   { label: "空间索引", enabled: props.layer.hasSpatialIndex }
 ]);
+const filteredFields = computed(() => {
+  const query = normalizedSearch.value;
+  if (!query) {
+    return props.layer.fields;
+  }
+  return props.layer.fields.filter((field) => (
+    field.name.toLowerCase().includes(query)
+    || typeLabel(field).toLowerCase().includes(query)
+    || valueLabel(field.defaultValue).toLowerCase().includes(query)
+    || boolLabel(field.nullable).includes(query)
+    || boolLabel(field.editable).includes(query)
+  ));
+});
+const sortedFields = useSorted(filteredFields, compareFields);
+const fieldCountLabel = computed(() => (
+  normalizedSearch.value
+    ? `${sortedFields.value.length}/${props.layer.fields.length} 个字段`
+    : `${props.layer.fields.length} 个字段`
+));
+const emptyFieldLabel = computed(() => (props.layer.fields.length === 0 ? "暂无字段" : "无匹配字段"));
+const sortControls = [
+  { key: "name", label: "字段" },
+  { key: "type", label: "类型" },
+  { key: "nullable", label: "可空" },
+  { key: "defaultValue", label: "默认值" },
+  { key: "editable", label: "可编辑" }
+] satisfies { key: FieldSortKey; label: string }[];
+
+function sortAriaLabel(key: FieldSortKey, label: string) {
+  if (sortKey.value !== key) {
+    return `按${label}升序排序`;
+  }
+  return sortDirection.value === "asc" ? `按${label}降序排序` : `按${label}升序排序`;
+}
+
+function sortMark(key: FieldSortKey) {
+  if (sortKey.value !== key) {
+    return "";
+  }
+  return sortDirection.value === "asc" ? "▲" : "▼";
+}
+
+function setSort(key: FieldSortKey) {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === "asc" ? "desc" : "asc";
+    return;
+  }
+  sortKey.value = key;
+  sortDirection.value = "asc";
+}
+
+function compareFields(left: FieldMeta, right: FieldMeta) {
+  const direction = sortDirection.value === "asc" ? 1 : -1;
+  return compareValue(readSortValue(left), readSortValue(right)) * direction;
+}
+
+function readSortValue(field: FieldMeta) {
+  if (sortKey.value === "type") {
+    return typeLabel(field);
+  }
+  if (sortKey.value === "nullable") {
+    return Number(field.nullable);
+  }
+  if (sortKey.value === "defaultValue") {
+    return field.defaultValue ?? "";
+  }
+  if (sortKey.value === "editable") {
+    return Number(field.editable);
+  }
+  return field.name;
+}
+
+function compareValue(left: string | number, right: string | number) {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+  return String(left).localeCompare(String(right), "zh-Hans-CN", {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
 
 function typeLabel(field: FieldMeta) {
   return field.udtName && field.udtName !== field.dataType
@@ -90,19 +178,38 @@ function boolLabel(value: boolean) {
         </span>
       </section>
 
+      <section class="attribute-table__controls" aria-label="字段浏览">
+        <label class="attribute-table__filter">
+          <span class="attribute-table__filter-label">字段过滤</span>
+          <input
+            v-model="fieldSearch"
+            class="attribute-table__filter-input focus-ring"
+            type="search"
+            aria-label="过滤字段"
+            placeholder="字段 / 类型 / 默认值"
+          />
+        </label>
+      </section>
+
       <div class="attribute-table__table-wrap">
         <table class="attribute-table__table">
           <thead>
             <tr>
-              <th scope="col">字段</th>
-              <th scope="col">类型</th>
-              <th scope="col">可空</th>
-              <th scope="col">默认值</th>
-              <th scope="col">可编辑</th>
+              <th v-for="control in sortControls" :key="control.key" scope="col">
+                <button
+                  class="attribute-table__sort focus-ring"
+                  type="button"
+                  :aria-label="sortAriaLabel(control.key, control.label)"
+                  @click="setSort(control.key)"
+                >
+                  <span>{{ control.label }}</span>
+                  <span class="attribute-table__sort-mark" aria-hidden="true">{{ sortMark(control.key) }}</span>
+                </button>
+              </th>
             </tr>
           </thead>
-          <tbody v-if="layer.fields.length > 0">
-            <tr v-for="field in layer.fields" :key="field.name">
+          <tbody v-if="sortedFields.length > 0">
+            <tr v-for="field in sortedFields" :key="field.name">
               <th scope="row">{{ field.name }}</th>
               <td>{{ typeLabel(field) }}</td>
               <td>{{ boolLabel(field.nullable) }}</td>
@@ -112,7 +219,7 @@ function boolLabel(value: boolean) {
           </tbody>
           <tbody v-else>
             <tr>
-              <td class="attribute-table__empty" colspan="5">暂无字段</td>
+              <td class="attribute-table__empty" colspan="5">{{ emptyFieldLabel }}</td>
             </tr>
           </tbody>
         </table>
@@ -248,6 +355,36 @@ function boolLabel(value: boolean) {
   color: var(--qgis-green);
 }
 
+.attribute-table__controls {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #c8c8c8;
+  padding: 8px 10px;
+  background: #f5f5f5;
+}
+
+.attribute-table__filter {
+  display: grid;
+  width: min(360px, 100%);
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.attribute-table__filter-label {
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.attribute-table__filter-input {
+  min-height: 24px;
+  min-width: 0;
+  border: 1px solid #aeb6bf;
+  background: var(--qgis-input);
+  color: var(--qgis-text);
+  padding: 3px 7px;
+}
+
 .attribute-table__table-wrap {
   max-height: 310px;
   overflow: auto;
@@ -277,11 +414,37 @@ function boolLabel(value: boolean) {
   top: 0;
   background: #e6e6e6;
   font-weight: 600;
+  padding: 0;
 }
 
 .attribute-table__table tbody th {
   background: #fafafa;
   font-weight: 600;
+}
+
+.attribute-table__sort {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 5px 8px;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+}
+
+.attribute-table__sort:hover {
+  background: var(--qgis-row-active);
+}
+
+.attribute-table__sort-mark {
+  width: 12px;
+  color: var(--qgis-blue);
+  text-align: right;
 }
 
 .attribute-table__empty {
@@ -305,6 +468,10 @@ function boolLabel(value: boolean) {
 
   .attribute-table__meta-item--wide {
     grid-column: span 2;
+  }
+
+  .attribute-table__filter {
+    grid-template-columns: 1fr;
   }
 }
 </style>

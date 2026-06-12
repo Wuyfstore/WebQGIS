@@ -375,6 +375,37 @@ describe("WebGisWorkbench", () => {
     expect(document.body.textContent).toContain("3 个字段");
     expect(document.body.textContent).toContain("adcode");
 
+    const fieldFilter = document.querySelector<HTMLInputElement>(".attribute-table__filter-input");
+    expect(fieldFilter).not.toBeNull();
+    fieldFilter!.value = "ad";
+    fieldFilter!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("1/3 个字段");
+    let visibleFieldNames = Array.from(document.querySelectorAll<HTMLTableCellElement>(".attribute-table__table tbody th"))
+      .map((cell) => cell.textContent?.trim());
+    expect(visibleFieldNames).toEqual(["adcode"]);
+
+    fieldFilter!.value = "missing";
+    fieldFilter!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("0/3 个字段");
+    expect(document.body.textContent).toContain("无匹配字段");
+
+    fieldFilter!.value = "";
+    fieldFilter!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const sortButtons = document.querySelectorAll<HTMLButtonElement>(".attribute-table__sort");
+    expect(sortButtons).toHaveLength(5);
+    sortButtons[1].click();
+    await flushPromises();
+
+    visibleFieldNames = Array.from(document.querySelectorAll<HTMLTableCellElement>(".attribute-table__table tbody th"))
+      .map((cell) => cell.textContent?.trim());
+    expect(visibleFieldNames).toEqual(["id", "adcode", "name"]);
+
     await document.querySelector<HTMLButtonElement>(".attribute-table__close")?.click();
     await flushPromises();
 
