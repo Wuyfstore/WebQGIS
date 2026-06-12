@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatasourcesRepository } from "../datasources/datasources.repository.js";
 import { PostgisRepository } from "../postgis/postgis.repository.js";
-import type { FeaturePayload, LayerRegistration } from "../types.js";
+import type { FeaturePayload, LayerRegistration, LayerStyle } from "../types.js";
+import { LayerStyleDto } from "./dto/layer-style.dto.js";
 import { LayersRepository } from "./layers.repository.js";
 
 @Injectable()
@@ -45,6 +46,19 @@ export class LayersService {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
     await this.postgisRepository.deleteFeature(datasource, layer, pk);
+  }
+
+  async updateStyle(layerId: string, dto: LayerStyleDto): Promise<LayerRegistration> {
+    const layer = await this.getRequiredLayer(layerId);
+    const nextStyle: LayerStyle = {
+      ...layer.style,
+      ...dto
+    };
+    const updated = await this.layersRepository.updateStyle(layerId, nextStyle);
+    if (!updated) {
+      throw new NotFoundException("Layer not found");
+    }
+    return updated;
   }
 
   async getVectorTile(layerId: string, z: number, x: number, y: number): Promise<Buffer> {

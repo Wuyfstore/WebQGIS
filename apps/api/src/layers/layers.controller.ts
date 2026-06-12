@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Param, Post, Put } fro
 import { FeatureParamDto } from "./dto/feature-param.dto.js";
 import { FeaturePayloadDto } from "./dto/feature-payload.dto.js";
 import { LayerParamDto } from "./dto/layer-param.dto.js";
+import { LayerStyleDto } from "./dto/layer-style.dto.js";
 import { TileParamDto } from "./dto/tile-param.dto.js";
 import { LayersService } from "./layers.service.js";
 
@@ -33,6 +34,11 @@ export class LayersController {
   @HttpCode(204)
   async deleteFeature(@Param() params: FeatureParamDto) {
     await this.layersService.deleteFeature(params.id, params.pk);
+  }
+
+  @Put(":id/style")
+  updateStyle(@Param() params: LayerParamDto, @Body() dto: LayerStyleDto) {
+    return this.layersService.updateStyle(params.id, dto);
   }
 
   @Get(":id/tile/:z/:x/:y.mvt")

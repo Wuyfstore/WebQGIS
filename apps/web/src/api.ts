@@ -1,4 +1,12 @@
-export type { Datasource, DatasourceForm, FieldMeta, GeoJsonFeature, LayerRegistration } from "./types/gis";
+export type {
+  Datasource,
+  DatasourceForm,
+  FieldMeta,
+  GeoJsonFeature,
+  LayerRegistration,
+  LayerStyle,
+  LayerStylePatch
+} from "./types/gis";
 
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(path);

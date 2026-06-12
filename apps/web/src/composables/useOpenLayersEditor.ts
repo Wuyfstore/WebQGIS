@@ -95,7 +95,10 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     for (const layer of options.layers.value) {
       mountLayer(layer);
-      layerMap.get(layer.id)?.setVisible(options.visibleLayerIds.value.has(layer.id));
+      const mountedLayer = layerMap.get(layer.id);
+      mountedLayer?.setVisible(options.visibleLayerIds.value.has(layer.id));
+      mountedLayer?.setOpacity(layer.style.opacity);
+      mountedLayer?.setStyle((feature) => layerStyle(layer, feature));
     }
     for (const [id, tileLayer] of layerMap) {
       if (!options.layers.value.some((layer) => layer.id === id)) {
@@ -221,12 +224,19 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     layerMap.get(layerId)?.getSource()?.refresh();
   }
 
+  function refreshLayerStyles() {
+    for (const tileLayer of layerMap.values()) {
+      tileLayer.changed();
+    }
+  }
+
   async function requestDeleteConfirmation() {
     const result = await reveal();
     return Boolean(result.data);
   }
 
   watch([options.layers, options.visibleLayerIds], syncLayers, { deep: false });
+  watch([options.activeLayer, options.selectedFeatureId], refreshLayerStyles, { deep: false });
 
   onBeforeUnmount(disposeMap);
 

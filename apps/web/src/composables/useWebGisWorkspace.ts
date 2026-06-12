@@ -7,6 +7,7 @@ import type {
   DatasourceForm,
   GeoJsonFeature,
   LayerRegistration,
+  LayerStylePatch,
   StatusMessage
 } from "../types/gis";
 
@@ -181,6 +182,14 @@ export function useWebGisWorkspace() {
     return Boolean(deleted);
   }
 
+  async function updateLayerStyle(layerId: string, patch: LayerStylePatch) {
+    await withBusy(async () => {
+      const updated = await apiSend<LayerRegistration>(`/api/layers/${layerId}/style`, "PUT", patch);
+      layers.value = layers.value.map((layer) => layer.id === updated.id ? updated : layer);
+      setStatus(`已更新图层样式：${updated.schema}.${updated.table}`, "success");
+    });
+  }
+
   return {
     datasources,
     layers,
@@ -206,6 +215,7 @@ export function useWebGisWorkspace() {
     readFeature,
     saveFeature,
     deleteSelectedFeature,
+    updateLayerStyle,
     clearDraftState,
     setStatus
   };

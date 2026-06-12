@@ -63,6 +63,10 @@ export type LayerRegistration = {
   updatedAt: string;
 };
 
+export type LayerStyle = LayerRegistration["style"];
+
+export type LayerStylePatch = Partial<LayerStyle>;
+
 export type ToastTone = "neutral" | "success" | "warning" | "danger";
 
 export type StatusMessage = {

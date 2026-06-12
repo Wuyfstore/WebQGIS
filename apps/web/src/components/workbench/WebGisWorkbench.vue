@@ -100,6 +100,7 @@ function handleClearDraft() {
         :editable-layer-count="workspace.editableLayerCount.value"
         @select="workspace.setActiveLayer"
         @toggle="workspace.toggleLayer"
+        @update-style="workspace.updateLayerStyle"
       />
     </aside>
 
