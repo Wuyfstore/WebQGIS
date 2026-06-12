@@ -1,11 +1,14 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
 import { CreateDatasourceDto } from "./dto/create-datasource.dto.js";
 import { DatasourceParamDto } from "./dto/datasource-param.dto.js";
 import { DatasourcesService } from "./datasources.service.js";
 
 @Controller("datasources")
 export class DatasourcesController {
-  constructor(private readonly datasourcesService: DatasourcesService) {}
+  constructor(
+    @Inject(DatasourcesService)
+    private readonly datasourcesService: DatasourcesService
+  ) {}
 
   @Post("test")
   test(@Body() dto: CreateDatasourceDto) {

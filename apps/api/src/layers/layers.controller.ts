@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, Put } from "@nestjs/common";
 import { FeatureParamDto } from "./dto/feature-param.dto.js";
 import { FeaturePayloadDto } from "./dto/feature-payload.dto.js";
 import { LayerParamDto } from "./dto/layer-param.dto.js";
@@ -8,7 +8,10 @@ import { LayersService } from "./layers.service.js";
 
 @Controller("layers")
 export class LayersController {
-  constructor(private readonly layersService: LayersService) {}
+  constructor(
+    @Inject(LayersService)
+    private readonly layersService: LayersService
+  ) {}
 
   @Get()
   list() {

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { JsonFileStore } from "../storage/json-file.store.js";
 import type { DatasourceConfig } from "../types.js";
 
@@ -6,7 +6,10 @@ import type { DatasourceConfig } from "../types.js";
 export class DatasourcesRepository {
   private readonly fileName = "datasources.json";
 
-  constructor(private readonly store: JsonFileStore) {}
+  constructor(
+    @Inject(JsonFileStore)
+    private readonly store: JsonFileStore
+  ) {}
 
   async findAll(): Promise<DatasourceConfig[]> {
     return this.store.read<DatasourceConfig[]>(this.fileName, []);
