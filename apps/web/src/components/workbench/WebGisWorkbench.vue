@@ -16,7 +16,7 @@ import {
   RefreshLeft,
   Search
 } from "@element-plus/icons-vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch, type Component } from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import AttributeTablePanel from "./AttributeTablePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
@@ -33,6 +33,7 @@ const menuRef = useTemplateRef<HTMLElement>("menuRef");
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
 const styleEditorLayerId = shallowRef<string | null>(null);
+const editingLayerId = shallowRef<string | null>(null);
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -83,6 +84,8 @@ const {
 
 const hasDraftGeometry = computed(() => Boolean(workspace.draftGeometry.value));
 const hasSelectedFeature = computed(() => Boolean(selectedFeatureId.value));
+const isActiveLayerEditable = computed(() => Boolean(activeLayer.value?.editable));
+const isEditingActiveLayer = computed(() => Boolean(activeLayer.value && editingLayerId.value === activeLayer.value.id));
 const statusClasses = computed(() => ({
   "workbench__status--success": status.value.tone === "success",
   "workbench__status--warning": status.value.tone === "warning",
@@ -94,7 +97,15 @@ const activeLayerLabel = computed(() => (
 const styleEditorLayer = computed(() => (
   layers.value.find((layer) => layer.id === styleEditorLayerId.value) ?? null
 ));
-const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
+const activeLayerEditStatus = computed(() => {
+  if (!activeLayer.value) {
+    return "未选择";
+  }
+  if (!activeLayer.value.editable) {
+    return "只读";
+  }
+  return isEditingActiveLayer.value ? "编辑中" : "关闭";
+});
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
 const projectionOptions = ["EPSG:3857", "EPSG:4326", "EPSG:4490", "EPSG:4547"] as const;
 const menuItems = [
@@ -120,15 +131,16 @@ type MenuCommand = {
 
 const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
   项目: [
-    { label: "新建编辑草稿", action: handleNewDraft, disabled: busy.value },
-    { label: "保存当前编辑", action: handleSaveFeature, disabled: busy.value || !hasDraftGeometry.value },
+    { label: "新建编辑草稿", action: handleNewDraft, disabled: busy.value || !isEditingActiveLayer.value },
+    { label: "保存当前编辑", action: handleSaveFeature, disabled: busy.value || !isEditingActiveLayer.value || !hasDraftGeometry.value },
     { label: "刷新工作区", action: handleRefreshAll, disabled: busy.value }
   ],
   编辑: [
     { label: "选择要素", action: () => editor.activateTool("select"), disabled: busy.value },
-    { label: "撤销当前草稿", action: handleClearDraft, disabled: busy.value || (!hasDraftGeometry.value && !hasSelectedFeature.value) },
-    { label: "节点编辑", action: () => editor.activateTool("node"), disabled: busy.value },
-    { label: "删除选中要素", action: handleDeleteFeature, disabled: busy.value || !hasSelectedFeature.value }
+    { label: isEditingActiveLayer.value ? "关闭当前图层编辑" : "切换当前图层编辑", action: toggleEditingActiveLayer, disabled: busy.value || !isActiveLayerEditable.value },
+    { label: "撤销当前草稿", action: handleClearDraft, disabled: busy.value || !isEditingActiveLayer.value || (!hasDraftGeometry.value && !hasSelectedFeature.value) },
+    { label: "节点编辑", action: () => editor.activateTool("node"), disabled: busy.value || !isEditingActiveLayer.value },
+    { label: "删除选中要素", action: handleDeleteFeature, disabled: busy.value || !isEditingActiveLayer.value || !hasSelectedFeature.value }
   ],
   视图: [
     { label: "平移地图", action: () => editor.activateTool("pan"), disabled: busy.value },
@@ -151,9 +163,9 @@ const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
     { label: "插件系统尚未纳入 V1", action: () => workspace.setStatus("插件系统不在 V1 范围内", "warning"), disabled: false }
   ],
   矢量: [
-    { label: "绘制点", action: () => startDrawing("Point"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point") },
-    { label: "绘制线", action: () => startDrawing("LineString"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString") },
-    { label: "绘制面", action: () => startDrawing("Polygon"), disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon") }
+    { label: "绘制点", action: () => startDrawing("Point"), disabled: busy.value || !isEditingActiveLayer.value || !availableDrawModes.value.includes("Point") },
+    { label: "绘制线", action: () => startDrawing("LineString"), disabled: busy.value || !isEditingActiveLayer.value || !availableDrawModes.value.includes("LineString") },
+    { label: "绘制面", action: () => startDrawing("Polygon"), disabled: busy.value || !isEditingActiveLayer.value || !availableDrawModes.value.includes("Polygon") }
   ],
   数据库: [
     { label: "新建 PostgreSQL 连接...", action: requestDatasourceConnectionDialog, disabled: busy.value },
@@ -185,7 +197,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: DocumentAdd,
     title: "新建编辑草稿",
     active: false,
-    disabled: busy.value,
+    disabled: busy.value || !isEditingActiveLayer.value,
     action: handleNewDraft
   },
   {
@@ -193,7 +205,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: DocumentChecked,
     title: "保存当前编辑",
     active: false,
-    disabled: busy.value || !hasDraftGeometry.value,
+    disabled: busy.value || !isEditingActiveLayer.value || !hasDraftGeometry.value,
     action: handleSaveFeature
   },
   {
@@ -201,8 +213,16 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: RefreshLeft,
     title: "撤销当前草稿",
     active: false,
-    disabled: busy.value || (!hasDraftGeometry.value && !hasSelectedFeature.value),
+    disabled: busy.value || !isEditingActiveLayer.value || (!hasDraftGeometry.value && !hasSelectedFeature.value),
     action: handleClearDraft
+  },
+  {
+    label: "编辑",
+    icon: EditPen,
+    title: isEditingActiveLayer.value ? "关闭当前图层编辑" : "开启当前图层编辑",
+    active: isEditingActiveLayer.value,
+    disabled: busy.value || !isActiveLayerEditable.value,
+    action: toggleEditingActiveLayer
   },
   {
     label: "选择",
@@ -241,7 +261,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: Location,
     title: "绘制点要素",
     active: activeTool.value === "draw" && drawMode.value === "Point",
-    disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Point"),
+    disabled: busy.value || !isEditingActiveLayer.value || !availableDrawModes.value.includes("Point"),
     action: () => startDrawing("Point")
   },
   {
@@ -249,7 +269,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: Minus,
     title: "绘制线要素",
     active: activeTool.value === "draw" && drawMode.value === "LineString",
-    disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("LineString"),
+    disabled: busy.value || !isEditingActiveLayer.value || !availableDrawModes.value.includes("LineString"),
     action: () => startDrawing("LineString")
   },
   {
@@ -257,7 +277,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: Crop,
     title: "绘制面要素",
     active: activeTool.value === "draw" && drawMode.value === "Polygon",
-    disabled: busy.value || !activeLayer.value?.editable || !availableDrawModes.value.includes("Polygon"),
+    disabled: busy.value || !isEditingActiveLayer.value || !availableDrawModes.value.includes("Polygon"),
     action: () => startDrawing("Polygon")
   },
   {
@@ -265,7 +285,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     icon: EditPen,
     title: "节点编辑",
     active: activeTool.value === "node",
-    disabled: busy.value,
+    disabled: busy.value || !isEditingActiveLayer.value,
     action: () => editor.activateTool("node")
   },
   {
@@ -306,6 +326,14 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", closeMenuOnEscape);
 });
 
+watch(activeLayerId, () => {
+  if (editingLayerId.value) {
+    editingLayerId.value = null;
+    handleClearDraft();
+    workspace.setStatus("已切换图层，编辑模式已关闭", "neutral");
+  }
+});
+
 function handleMapReady(element: HTMLDivElement) {
   mapElement.value = element;
   editor.initializeMap();
@@ -341,11 +369,19 @@ async function runMenuCommand(command: MenuCommand) {
 }
 
 function handleNewDraft() {
+  if (!isEditingActiveLayer.value) {
+    workspace.setStatus("请先开启当前图层编辑", "warning");
+    return;
+  }
   handleClearDraft();
   workspace.setStatus("已新建空白编辑草稿，请选择绘制工具开始采集", "success");
 }
 
 async function handleSaveFeature() {
+  if (!isEditingActiveLayer.value) {
+    workspace.setStatus("请先开启当前图层编辑后再保存", "warning");
+    return;
+  }
   const saved = await workspace.saveFeature();
   if (saved) {
     editor.loadEditableFeature(saved);
@@ -354,6 +390,10 @@ async function handleSaveFeature() {
 }
 
 async function handleDeleteFeature() {
+  if (!isEditingActiveLayer.value) {
+    workspace.setStatus("请先开启当前图层编辑后再删除", "warning");
+    return;
+  }
   const confirmed = await editor.requestDeleteConfirmation();
   if (!confirmed) {
     return;
@@ -371,8 +411,32 @@ function handleClearDraft() {
 }
 
 function startDrawing(mode?: GeometryMode) {
+  if (!isEditingActiveLayer.value) {
+    workspace.setStatus("请先开启当前图层编辑后再绘制", "warning");
+    return;
+  }
   workspace.clearDraftState();
   editor.startDrawing(mode);
+}
+
+function toggleEditingActiveLayer() {
+  const layer = activeLayer.value;
+  if (!layer) {
+    workspace.setStatus("请先选择一个图层", "warning");
+    return;
+  }
+  if (!layer.editable) {
+    workspace.setStatus(`当前图层只读：${layer.editableReason.join("；") || "缺少可编辑条件"}`, "warning");
+    return;
+  }
+  if (isEditingActiveLayer.value) {
+    editingLayerId.value = null;
+    handleClearDraft();
+    workspace.setStatus(`已关闭图层编辑：${layer.schema}.${layer.table}`, "neutral");
+    return;
+  }
+  editingLayerId.value = layer.id;
+  workspace.setStatus(`已开启图层编辑：${layer.schema}.${layer.table}`, "success");
 }
 
 async function handleRefreshAll() {
@@ -578,6 +642,7 @@ function validateActiveLayer() {
         :busy="busy"
         :has-draft-geometry="hasDraftGeometry"
         :has-selected-feature="hasSelectedFeature"
+        :is-editing-layer="isEditingActiveLayer"
         :is-drawing="isDrawing"
         :map-style="mapCssVars"
         @ready="handleMapReady"
@@ -585,12 +650,14 @@ function validateActiveLayer() {
         @save="handleSaveFeature"
         @delete="handleDeleteFeature"
         @clear="handleClearDraft"
+        @toggle-edit="toggleEditingActiveLayer"
       />
 
       <EditInspector
         v-model:selected-properties="selectedProperties"
         :active-layer="activeLayer"
         :editable-fields="editableFields"
+        :is-editing-layer="isEditingActiveLayer"
         :selected-layer-status="selectedLayerStatus"
         :selected-feature-id="selectedFeatureId"
       />

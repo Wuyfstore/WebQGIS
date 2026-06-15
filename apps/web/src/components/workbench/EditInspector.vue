@@ -6,6 +6,7 @@ import type { FieldMeta, LayerRegistration } from "../../types/gis";
 const props = defineProps<{
   activeLayer?: LayerRegistration;
   editableFields: FieldMeta[];
+  isEditingLayer: boolean;
   selectedLayerStatus: string;
   selectedFeatureId: string | null;
 }>();
@@ -44,12 +45,14 @@ const layerGeometrySummary = computed(() => {
       <header class="edit-inspector__header">
         <h2 class="edit-inspector__title">属性表单</h2>
       </header>
-      <div v-if="editableFields.length === 0" class="edit-inspector__empty">没有可编辑字段</div>
+      <div v-if="!isEditingLayer" class="edit-inspector__empty">开启当前图层编辑后可修改属性</div>
+      <div v-else-if="editableFields.length === 0" class="edit-inspector__empty">没有可编辑字段</div>
       <label v-for="field in editableFields" :key="field.name" class="edit-inspector__field">
         <span class="edit-inspector__field-name">{{ field.name }}</span>
         <input
           v-model="selectedProperties[field.name]"
           class="edit-inspector__input focus-ring"
+          :disabled="!isEditingLayer"
           :name="`field-${field.name}`"
           :placeholder="field.dataType"
           :type="isNumericField(field.dataType) ? 'number' : 'text'"
@@ -63,6 +66,7 @@ const layerGeometrySummary = computed(() => {
         <h2 class="edit-inspector__title">保存校验</h2>
       </header>
       <ul class="edit-inspector__checks">
+        <li v-if="!isEditingLayer" class="edit-inspector__check edit-inspector__check--warn">当前图层未开启编辑</li>
         <li class="edit-inspector__check edit-inspector__check--ok">SRID 可转换到地图坐标系</li>
         <li class="edit-inspector__check edit-inspector__check--ok">几何类型符合 {{ activeLayer?.geometryType ?? "当前图层" }}</li>
         <li class="edit-inspector__check edit-inspector__check--warn">未检测到 version 字段，保存可能覆盖</li>
@@ -168,6 +172,11 @@ WHERE {{ activeLayer?.primaryKey ?? "id" }} = {{ selectedFeatureId ?? "?" }};</p
   padding: 2px 8px;
   background: var(--qgis-input);
   color: var(--qgis-text);
+}
+
+.edit-inspector__input:disabled {
+  background: var(--qgis-readonly);
+  color: var(--qgis-muted);
 }
 
 .edit-inspector__empty {

@@ -8,6 +8,7 @@ const props = defineProps<{
   busy: boolean;
   hasDraftGeometry: boolean;
   hasSelectedFeature: boolean;
+  isEditingLayer: boolean;
   isDrawing: boolean;
   mapStyle?: Record<string, string>;
 }>();
@@ -20,6 +21,7 @@ const emit = defineEmits<{
   save: [];
   delete: [];
   clear: [];
+  toggleEdit: [];
 }>();
 
 const mapRoot = useTemplateRef<HTMLDivElement>("mapRoot");
@@ -38,11 +40,11 @@ onMounted(() => {
 
     <div class="map-canvas__toolbar" aria-label="编辑工具栏">
       <div class="map-canvas__toolbar-title">
-        编辑图层: {{ activeLayer ? `${activeLayer.schema}.${activeLayer.table}` : "未选择" }}
+        活动图层: {{ activeLayer ? `${activeLayer.schema}.${activeLayer.table}` : "未选择" }}
       </div>
       <label class="map-canvas__mode">
         <span class="map-canvas__label">绘制类型</span>
-        <select v-model="drawMode" class="map-canvas__select focus-ring">
+        <select v-model="drawMode" class="map-canvas__select focus-ring" :disabled="busy || !isEditingLayer">
           <option v-for="mode in geometryModes" :key="mode" :value="mode">
             {{ mode }}
           </option>
@@ -51,7 +53,17 @@ onMounted(() => {
 
       <button
         class="map-canvas__button focus-ring"
+        :class="{ 'map-canvas__button--active': isEditingLayer }"
         :disabled="busy || !activeLayer?.editable"
+        type="button"
+        @click="emit('toggleEdit')"
+      >
+        {{ isEditingLayer ? "关闭编辑" : "开启编辑" }}
+      </button>
+
+      <button
+        class="map-canvas__button focus-ring"
+        :disabled="busy || !isEditingLayer"
         type="button"
         @click="emit('draw')"
       >
@@ -60,7 +72,7 @@ onMounted(() => {
 
       <button
         class="map-canvas__button map-canvas__button--primary focus-ring"
-        :disabled="busy || !hasDraftGeometry"
+        :disabled="busy || !isEditingLayer || !hasDraftGeometry"
         type="button"
         @click="emit('save')"
       >
@@ -69,19 +81,19 @@ onMounted(() => {
 
       <button
         class="map-canvas__button map-canvas__button--danger focus-ring"
-        :disabled="busy || !hasSelectedFeature"
+        :disabled="busy || !isEditingLayer || !hasSelectedFeature"
         type="button"
         @click="emit('delete')"
       >
         删除
       </button>
 
-      <button class="map-canvas__button focus-ring" type="button" @click="emit('clear')">
+      <button class="map-canvas__button focus-ring" :disabled="busy || !isEditingLayer" type="button" @click="emit('clear')">
         清空
       </button>
 
       <p class="map-canvas__hint">
-        MVT 用于浏览，编辑草稿来自原始 PostGIS geometry
+        {{ isEditingLayer ? "编辑已开启：草稿来自原始 PostGIS geometry" : "先开启编辑，再绘制、修改或保存要素" }}
       </p>
     </div>
   </section>
@@ -116,7 +128,7 @@ onMounted(() => {
   top: 18px;
   left: 18px;
   display: grid;
-  grid-template-columns: 132px repeat(4, auto);
+  grid-template-columns: 132px repeat(5, auto);
   max-width: calc(100% - 36px);
   align-items: end;
   gap: 8px;
@@ -171,6 +183,14 @@ onMounted(() => {
   border-color: #6f9fc9;
   background: var(--qgis-blue-soft);
   color: var(--qgis-blue);
+}
+
+.map-canvas__button--active {
+  border-color: #777777;
+  background: #cfcfcf;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -1px 0 #9d9d9d;
 }
 
 .map-canvas__button--danger {

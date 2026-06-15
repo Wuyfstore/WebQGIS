@@ -331,22 +331,59 @@ describe("WebGisWorkbench", () => {
     await flushPromises();
 
     const tools = wrapper.findAll(".workbench__tool");
+    const editTool = tools.find((tool) => tool.attributes("title") === "开启当前图层编辑");
     const selectTool = tools.find((tool) => tool.attributes("title") === "选择要素");
+    const drawPointTool = tools.find((tool) => tool.attributes("title") === "绘制点要素");
+    const drawPolygonTool = tools.find((tool) => tool.attributes("title") === "绘制面要素");
     const zoomTool = tools.find((tool) => tool.attributes("title") === "放大一级");
     const snapTool = tools.find((tool) => tool.attributes("title") === "切换吸附");
 
+    expect(editTool?.exists()).toBe(true);
     expect(selectTool?.exists()).toBe(true);
+    expect(drawPointTool?.attributes("disabled")).toBeDefined();
+    expect(drawPolygonTool?.attributes("disabled")).toBeDefined();
     expect(zoomTool?.exists()).toBe(true);
     expect(snapTool?.exists()).toBe(true);
+    expect(wrapper.text()).toContain("编辑:");
+    expect(wrapper.text()).toContain("关闭");
+    expect(wrapper.text()).toContain("开启当前图层编辑后可修改属性");
+
+    await wrapper.findAll(".map-canvas__button")
+      .find((button) => button.text() === "开启编辑")
+      ?.trigger("click");
+    await flushPromises();
+
+    const activeEditTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "关闭当前图层编辑");
+    const enabledDrawPointTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "绘制点要素");
+    const enabledDrawPolygonTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "绘制面要素");
+    expect(activeEditTool?.classes()).toContain("workbench__tool--active");
+    expect(enabledDrawPointTool?.attributes("disabled")).toBeDefined();
+    expect(enabledDrawPolygonTool?.attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("编辑中");
+    expect(wrapper.text()).not.toContain("开启当前图层编辑后可修改属性");
 
     await selectTool?.trigger("click");
+    await enabledDrawPolygonTool?.trigger("click");
     await zoomTool?.trigger("click");
     await snapTool?.trigger("click");
 
     expect(editorMock.activateTool).toHaveBeenCalledWith("select");
+    expect(editorMock.startDrawing).toHaveBeenCalledWith("Polygon");
     expect(editorMock.zoomIn).toHaveBeenCalled();
     expect(editorMock.activateTool).not.toHaveBeenCalledWith("zoom");
     expect(editorMock.toggleSnap).toHaveBeenCalled();
+
+    await wrapper.findAll(".layer-panel__select")[1].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("已切换图层，编辑模式已关闭");
+    expect(wrapper.text()).toContain("关闭");
+    expect(wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "绘制面要素")
+      ?.attributes("disabled")).toBeDefined();
   });
 
   it("renders live map status labels from the OpenLayers editor", () => {
