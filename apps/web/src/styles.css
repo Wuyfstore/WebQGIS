@@ -65,6 +65,14 @@ button {
   outline: none !important;
 }
 
+.focus-ring:focus {
+  --un-ring-color: transparent !important;
+  --un-ring-offset-width: 0px !important;
+  --un-ring-width: 0px !important;
+  --un-ring-offset-shadow: 0 0 #0000 !important;
+  --un-ring-shadow: 0 0 #0000 !important;
+}
+
 button:disabled,
 input:disabled,
 select:disabled {
