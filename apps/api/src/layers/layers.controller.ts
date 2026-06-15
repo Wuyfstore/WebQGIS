@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, Put, Query } from "@nestjs/common";
 import { FeatureParamDto } from "./dto/feature-param.dto.js";
+import { FeatureListQueryDto } from "./dto/feature-list-query.dto.js";
 import { FeaturePayloadDto } from "./dto/feature-payload.dto.js";
 import { LayerParamDto } from "./dto/layer-param.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
@@ -19,8 +20,8 @@ export class LayersController {
   }
 
   @Get(":id/features")
-  listFeatures(@Param() params: LayerParamDto) {
-    return this.layersService.listFeatures(params.id);
+  listFeatures(@Param() params: LayerParamDto, @Query() query: FeatureListQueryDto) {
+    return this.layersService.listFeatures(params.id, query);
   }
 
   @Get(":id/features/:pk")

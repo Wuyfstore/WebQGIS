@@ -39,6 +39,7 @@ const editor = useOpenLayersEditor({
   visibleLayerIds: workspace.visibleLayerIds,
   selectedFeatureId: workspace.selectedFeatureId,
   draftGeometry: workspace.draftGeometry,
+  displayProjection: workspace.displayProjection,
   readFeature: workspace.readFeature,
   clearSelection: workspace.clearDraftState,
   setStatus: workspace.setStatus
@@ -51,6 +52,8 @@ const {
   activeLayer,
   attributeTableLayer,
   attributeTableFeatures,
+  attributeTableTotal,
+  attributeTableQuery,
   visibleLayerIds,
   displayProjection,
   canRestoreVisibleLayerIds,
@@ -69,7 +72,11 @@ const {
   isDrawing,
   isSnapEnabled,
   isDeleteDialogOpen,
-  mapCssVars
+  mapCssVars,
+  coordinateLabel,
+  scaleLabel,
+  projectionLabel,
+  zoomLevel
 } = editor;
 
 const hasDraftGeometry = computed(() => Boolean(workspace.draftGeometry.value));
@@ -120,7 +127,7 @@ const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
   ],
   视图: [
     { label: "平移地图", action: () => editor.activateTool("pan"), disabled: busy.value },
-    { label: "放大地图", action: () => editor.activateTool("zoom"), disabled: busy.value },
+    { label: "放大一级", action: editor.zoomIn, disabled: busy.value },
     { label: "刷新当前图层", action: handleRefreshAll, disabled: busy.value }
   ],
   图层: [
@@ -209,12 +216,12 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
     action: () => editor.activateTool("pan")
   },
   {
-    label: "缩放",
+    label: "放大",
     icon: Search,
-    title: "放大地图",
-    active: activeTool.value === "zoom",
+    title: "放大一级",
+    active: false,
     disabled: busy.value,
-    action: () => editor.activateTool("zoom")
+    action: editor.zoomIn
   },
   {
     label: "识别",
@@ -540,34 +547,41 @@ function validateActiveLayer() {
     </section>
 
     <footer class="workbench__statusbar">
-      <span>坐标 104.0648, 30.6572</span>
-      <span>比例尺 1:2500</span>
-      <span>{{ displayProjection }} 显示 / EPSG:4326 数据源</span>
+      <span>{{ coordinateLabel }}</span>
+      <span>{{ scaleLabel }}</span>
+      <span>{{ projectionLabel }}</span>
+      <span>Zoom {{ zoomLevel.toFixed(2) }}</span>
       <span class="workbench__statusbar-ok">捕捉: 顶点+线段 8 px</span>
       <span :class="statusClasses" class="workbench__status" role="status">{{ status.text }}</span>
     </footer>
 
-    <div v-if="isDeleteDialogOpen" class="workbench__dialog-backdrop">
-      <section class="workbench__dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
-        <h2 id="delete-title" class="workbench__dialog-title">删除要素</h2>
-        <p class="workbench__dialog-copy">
-          删除后会直接写回 PostGIS。请确认当前选中的要素不再需要保留。
-        </p>
-        <div class="workbench__dialog-actions">
-          <button class="workbench__dialog-button focus-ring" type="button" @click="editor.cancelDelete">
-            取消
-          </button>
-          <button class="workbench__dialog-button workbench__dialog-button--danger focus-ring" type="button" @click="editor.confirmDelete">
-            删除
-          </button>
-        </div>
-      </section>
-    </div>
+    <Teleport to="body">
+      <div v-if="isDeleteDialogOpen" class="workbench__dialog-backdrop">
+        <section class="workbench__dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+          <h2 id="delete-title" class="workbench__dialog-title">删除要素</h2>
+          <p class="workbench__dialog-copy">
+            删除后会直接写回 PostGIS。请确认当前选中的要素不再需要保留。
+          </p>
+          <div class="workbench__dialog-actions">
+            <button class="workbench__dialog-button focus-ring" type="button" @click="editor.cancelDelete">
+              取消
+            </button>
+            <button class="workbench__dialog-button workbench__dialog-button--danger focus-ring" type="button" @click="editor.confirmDelete">
+              删除
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <AttributeTablePanel
       v-if="attributeTableLayer"
       :layer="attributeTableLayer"
       :features="attributeTableFeatures"
+      :total="attributeTableTotal"
+      :query="attributeTableQuery"
+      :busy="busy"
+      @query="workspace.updateAttributeTableQuery"
       @close="closeAttributeTable"
     />
   </main>
@@ -636,7 +650,7 @@ function validateActiveLayer() {
   position: absolute;
   top: 100%;
   left: 0;
-  z-index: 30;
+  z-index: var(--qgis-z-menu);
   min-width: 180px;
   border: 1px solid #8d8d8d;
   background: #f7f7f7;
@@ -826,7 +840,7 @@ function validateActiveLayer() {
 .workbench__dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: var(--qgis-z-modal);
   display: grid;
   place-items: center;
   padding: 24px;

@@ -14,6 +14,21 @@ export type FeatureSummary = {
   properties: Record<string, unknown>;
 };
 
+export type FeaturePage = {
+  items: FeatureSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type AttributeTableQuery = {
+  limit: number;
+  offset: number;
+  search: string;
+  sort?: string;
+  order: "asc" | "desc";
+};
+
 export type FieldMeta = {
   name: string;
   dataType: string;

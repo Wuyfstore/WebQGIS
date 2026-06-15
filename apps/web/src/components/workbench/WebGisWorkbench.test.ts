@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shallowRef } from "vue";
 import WebGisWorkbench from "./WebGisWorkbench.vue";
+import { apiGet } from "../../api";
 import type { Datasource, LayerRegistration } from "../../types/gis";
 
 const sampleDatasources: Datasource[] = [];
@@ -118,6 +119,10 @@ const editorMock = {
     "--map-grid-size": "64px",
     "--map-grid-opacity": "0.42"
   }),
+  coordinateLabel: shallowRef("坐标 104.06480, 30.65720 / EPSG:4326"),
+  scaleLabel: shallowRef("比例尺 1:2,500"),
+  projectionLabel: shallowRef("EPSG:4326 显示 / EPSG:4326 数据源 · WGS84 经纬度显示坐标"),
+  zoomLevel: shallowRef(7.25),
   initializeMap: vi.fn(),
   loadEditableFeature: vi.fn(),
   clearDraft: vi.fn(),
@@ -145,29 +150,31 @@ vi.mock("../../api", () => ({
     if (path === "/api/layers") {
       return sampleLayers;
     }
-    if (path === "/api/layers/city/features") {
-      return [
-        {
-          type: "Feature",
-          id: 1024,
-          geometry: null,
-          properties: {
-            id: 1024,
-            name: "成都市",
-            adcode: 510100
+    if (path.startsWith("/api/layers/city/features")) {
+      const url = new URL(path, "http://localhost");
+      const search = url.searchParams.get("search") ?? "";
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const items = [
+          {
+            type: "Feature" as const,
+            id: offset + 1024,
+            geometry: null,
+            properties: { id: offset + 1024, name: offset > 0 ? "德阳市" : "成都市", adcode: offset > 0 ? 510600 : 510100 }
+          },
+          {
+            type: "Feature" as const,
+            id: offset + 1025,
+            geometry: null,
+            properties: { id: offset + 1025, name: "绵阳市", adcode: 510700 }
           }
-        },
-        {
-          type: "Feature",
-          id: 1025,
-          geometry: null,
-          properties: {
-            id: 1025,
-            name: "绵阳市",
-            adcode: 510700
-          }
-        }
-      ];
+        ]
+        .filter((feature) => !search || feature.properties.name.includes(search));
+      return {
+        items,
+        total: search ? items.length : 128,
+        limit: Number(url.searchParams.get("limit") ?? 100),
+        offset
+      };
     }
     throw new Error(`Unhandled apiGet ${path}`);
   }),
@@ -182,6 +189,10 @@ describe("WebGisWorkbench", () => {
     editorMock.isDrawing.value = false;
     editorMock.isSnapEnabled.value = true;
     editorMock.isDeleteDialogOpen.value = false;
+    editorMock.coordinateLabel.value = "坐标 104.06480, 30.65720 / EPSG:4326";
+    editorMock.scaleLabel.value = "比例尺 1:2,500";
+    editorMock.projectionLabel.value = "EPSG:4326 显示 / EPSG:4326 数据源 · WGS84 经纬度显示坐标";
+    editorMock.zoomLevel.value = 7.25;
     editorMock.zoomToLayerExtent.mockReturnValue(true);
   });
 
@@ -267,16 +278,30 @@ describe("WebGisWorkbench", () => {
 
     const tools = wrapper.findAll(".workbench__tool");
     const selectTool = tools.find((tool) => tool.attributes("title") === "选择要素");
+    const zoomTool = tools.find((tool) => tool.attributes("title") === "放大一级");
     const snapTool = tools.find((tool) => tool.attributes("title") === "切换吸附");
 
     expect(selectTool?.exists()).toBe(true);
+    expect(zoomTool?.exists()).toBe(true);
     expect(snapTool?.exists()).toBe(true);
 
     await selectTool?.trigger("click");
+    await zoomTool?.trigger("click");
     await snapTool?.trigger("click");
 
     expect(editorMock.activateTool).toHaveBeenCalledWith("select");
+    expect(editorMock.zoomIn).toHaveBeenCalled();
+    expect(editorMock.activateTool).not.toHaveBeenCalledWith("zoom");
     expect(editorMock.toggleSnap).toHaveBeenCalled();
+  });
+
+  it("renders live map status labels from the OpenLayers editor", () => {
+    const wrapper = mount(WebGisWorkbench);
+
+    expect(wrapper.text()).toContain("坐标 104.06480, 30.65720 / EPSG:4326");
+    expect(wrapper.text()).toContain("比例尺 1:2,500");
+    expect(wrapper.text()).toContain("EPSG:4326 显示 / EPSG:4326 数据源");
+    expect(wrapper.text()).toContain("Zoom 7.25");
   });
 
   it("can show only the active layer and then show all layers from the layer menu", async () => {
@@ -396,19 +421,45 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.text()).toContain("已打开属性表：public.china_2025_city");
     expect(document.body.textContent).toContain("属性表 - public.china_2025_city");
-    expect(document.body.textContent).toContain("2 条记录");
+    expect(document.body.textContent).toContain("2/128 条记录");
     expect(document.body.textContent).toContain("成都市");
     expect(document.body.textContent).toContain("绵阳市");
+    const attributeTable = document.querySelector<HTMLElement>(".attribute-table");
+    expect(attributeTable).not.toBeNull();
+    expect(attributeTable?.parentElement).toBe(document.body);
+    expect(attributeTable?.className).toContain("attribute-table");
+    expect(getComputedStyle(attributeTable!).position).toBe("fixed");
+    expect(attributeTable!.getAttribute("style")).toContain("left:");
     expect(document.querySelector(".attribute-table__header")).not.toBeNull();
+    expect(document.body.textContent).toContain("1-2 / 128 条记录");
+    expect(document.body.textContent).toContain("第 1/2 页");
+
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
+      .find((button) => button.textContent?.trim() === "下一页")
+      ?.click();
+    await flushPromises();
+
+    expect(vi.mocked(apiGet)).toHaveBeenCalledWith(expect.stringContaining("offset=100"));
+    expect(document.body.textContent).toContain("101-102 / 128 条记录");
+
+    document.querySelector<HTMLButtonElement>(".attribute-table__record-sort")?.click();
+    await flushPromises();
+
+    expect(vi.mocked(apiGet)).toHaveBeenCalledWith(expect.stringContaining("sort=id"));
+    expect(vi.mocked(apiGet)).toHaveBeenCalledWith(expect.stringContaining("order=desc"));
 
     const recordFilter = document.querySelector<HTMLInputElement>(".attribute-table__filter-input");
     expect(recordFilter).not.toBeNull();
     recordFilter!.value = "绵阳";
     recordFilter!.dispatchEvent(new Event("input"));
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
+      .find((button) => button.textContent?.trim() === "查询")
+      ?.click();
     await flushPromises();
 
-    expect(document.body.textContent).toContain("1/2 条记录");
+    expect(document.body.textContent).toContain("1/1 条记录");
     expect(document.body.textContent).toContain("绵阳市");
+    expect(document.body.textContent).not.toContain("成都市");
 
     await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[1].click();
     await flushPromises();

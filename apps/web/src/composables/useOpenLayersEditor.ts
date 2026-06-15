@@ -13,7 +13,7 @@ import VectorTileSource from "ol/source/VectorTile";
 import { Modify, Snap, Draw } from "ol/interaction";
 import { unByKey } from "ol/Observable";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
-import { fromLonLat, transformExtent } from "ol/proj";
+import { fromLonLat, getPointResolution, transform, transformExtent } from "ol/proj";
 import type { Geometry } from "ol/geom";
 import type { FeatureLike } from "ol/Feature";
 import type { DrawEvent } from "ol/interaction/Draw";
@@ -21,9 +21,17 @@ import type { EventsKey } from "ol/events";
 import type { Pixel } from "ol/pixel";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
 
-export type MapTool = "select" | "pan" | "zoom" | "identify" | "node" | "draw";
+export type MapTool = "select" | "pan" | "identify" | "node" | "draw";
 
 const singleClickEvent = "singleclick" as const;
+const pointerMoveEvent = "pointermove" as const;
+const screenDpi = 25.4 / 0.28;
+const projectionHints: Record<string, string> = {
+  "EPSG:3857": "Web Mercator 显示坐标",
+  "EPSG:4326": "WGS84 经纬度显示坐标",
+  "EPSG:4490": "CGCS2000 经纬度；需注册投影参数后可精确转换",
+  "EPSG:4547": "CGCS2000 / 3-degree GK CM 105E；需注册投影参数后可精确转换"
+};
 
 export function readVectorTileFeaturePk(feature: Pick<FeatureLike, "get" | "getId">): string | null {
   const rawId = typeof feature.getId === "function" ? feature.getId() : undefined;
@@ -42,6 +50,38 @@ export function projectLayerExtent(extent: LayerRegistration["extent"]) {
   return transformExtent(extent, "EPSG:4326", "EPSG:3857");
 }
 
+export function estimateScaleDenominator(resolution?: number | null, center: [number, number] = [0, 0]) {
+  if (!resolution || !Number.isFinite(resolution) || resolution <= 0) {
+    return null;
+  }
+  const pointResolution = getPointResolution("EPSG:3857", resolution, center, "m");
+  return Math.max(1, Math.round((pointResolution * screenDpi) / 0.0254));
+}
+
+export function formatScaleLabel(scale: number | null) {
+  if (!scale) {
+    return "比例尺 -";
+  }
+  return `比例尺 1:${scale.toLocaleString("zh-Hans-CN")}`;
+}
+
+export function formatCoordinateLabel(coordinate: [number, number] | null, projection: string) {
+  if (!coordinate) {
+    return `坐标 - / ${projection}`;
+  }
+  const precision = projection === "EPSG:3857" ? 1 : 5;
+  return `坐标 ${coordinate[0].toFixed(precision)}, ${coordinate[1].toFixed(precision)} / ${projection}`;
+}
+
+export function projectionStatusLabel(displayProjection: string, dataProjection = "EPSG:4326") {
+  const hint = projectionHints[displayProjection] ?? "自定义显示坐标";
+  return `${displayProjection} 显示 / ${dataProjection} 数据源 · ${hint}`;
+}
+
+function toCoordinatePair(coordinate: number[]): [number, number] {
+  return [coordinate[0] ?? 0, coordinate[1] ?? 0];
+}
+
 type UseOpenLayersEditorOptions = {
   mapElement: Ref<HTMLDivElement | null>;
   layers: Ref<LayerRegistration[]>;
@@ -49,6 +89,7 @@ type UseOpenLayersEditorOptions = {
   visibleLayerIds: Ref<Set<string>>;
   selectedFeatureId: Ref<string | null>;
   draftGeometry: Ref<unknown>;
+  displayProjection: Ref<string>;
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
   clearSelection?: () => void;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
@@ -61,6 +102,11 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const isDrawing = shallowRef(false);
   const isSnapEnabled = shallowRef(true);
   const zoomLevel = shallowRef(4);
+  const pointerCoordinate = shallowRef<[number, number] | null>(null);
+  const scaleDenominator = shallowRef<number | null>(null);
+  const coordinateLabel = computed(() => formatCoordinateLabel(pointerCoordinate.value, options.displayProjection.value));
+  const scaleLabel = computed(() => formatScaleLabel(scaleDenominator.value));
+  const projectionLabel = computed(() => projectionStatusLabel(options.displayProjection.value));
   const mapCssVars = computed(() => {
     const zoom = zoomLevel.value;
     const gridSize = Math.max(24, Math.min(96, Math.round(96 / Math.max(1, zoom / 4))));
@@ -77,6 +123,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   let snapInteraction: Snap | null = null;
   let drawInteraction: Draw | null = null;
   let mapClickKey: EventsKey | null = null;
+  let pointerMoveKey: EventsKey | null = null;
   let viewChangeKey: EventsKey | null = null;
 
   const editSource = new VectorSource();
@@ -106,10 +153,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       }),
       controls: []
     });
-    zoomLevel.value = map.value.getView().getZoom() ?? 4;
-    viewChangeKey = map.value.getView().on("change:resolution", () => {
-      zoomLevel.value = map.value?.getView().getZoom() ?? zoomLevel.value;
-    });
+    updateViewState();
+    viewChangeKey = map.value.getView().on("change:resolution", updateViewState);
 
     modifyInteraction = new Modify({ source: editSource });
     snapInteraction = new Snap({ source: editSource });
@@ -118,6 +163,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     modifyInteraction.setActive(false);
     modifyInteraction.on("modifyend", updateDraftGeometry);
     mapClickKey = map.value.on(singleClickEvent, handleMapClick);
+    pointerMoveKey = map.value.on(pointerMoveEvent, handlePointerMove);
     syncLayers();
   }
 
@@ -126,6 +172,10 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     if (mapClickKey) {
       unByKey(mapClickKey);
       mapClickKey = null;
+    }
+    if (pointerMoveKey) {
+      unByKey(pointerMoveKey);
+      pointerMoveKey = null;
     }
     if (viewChangeKey) {
       unByKey(viewChangeKey);
@@ -196,6 +246,32 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     const feature = pickFeatureAtPixel(event.pixel, activeTileLayer)
       ?? pickFeatureAtPixel(event.pixel);
     void handleFeaturePick(feature);
+  }
+
+  function handlePointerMove(event: MapBrowserEvent) {
+    pointerCoordinate.value = projectMapCoordinate(toCoordinatePair(event.coordinate));
+  }
+
+  function projectMapCoordinate(coordinate: [number, number]) {
+    const projection = options.displayProjection.value;
+    if (projection === "EPSG:4490") {
+      return transform(coordinate, "EPSG:3857", "EPSG:4326") as [number, number];
+    }
+    if (projection === "EPSG:4547") {
+      return null;
+    }
+    return transform(coordinate, "EPSG:3857", projection) as [number, number];
+  }
+
+  function updateViewState() {
+    const view = map.value?.getView();
+    if (!view) {
+      return;
+    }
+    const zoom = view.getZoom() ?? zoomLevel.value;
+    const center = view.getCenter() as [number, number] | undefined;
+    zoomLevel.value = zoom;
+    scaleDenominator.value = estimateScaleDenominator(view.getResolution(), center);
   }
 
   function pickFeatureAtPixel(pixel: Pixel, preferredLayer?: TileLayer<VectorTileSource>) {
@@ -321,8 +397,6 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       options.setStatus("选择工具已启用：点击地图要素读取原始 geometry", "neutral");
     } else if (tool === "pan") {
       options.setStatus("平移工具已启用：拖拽地图移动视图", "neutral");
-    } else if (tool === "zoom") {
-      zoomIn();
     } else if (tool === "identify") {
       options.setStatus("识别工具已启用：点击要素查看属性", "neutral");
     } else if (tool === "node") {
@@ -339,7 +413,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       options.setStatus("地图尚未初始化", "warning");
       return;
     }
-    activeTool.value = "zoom";
+    stopDrawing();
     view.animate({
       zoom: (view.getZoom() ?? 5) + 1,
       duration: 180
@@ -399,12 +473,23 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   watch([options.layers, options.visibleLayerIds], syncLayers, { deep: false });
   watch([options.activeLayer, options.selectedFeatureId], refreshLayerStyles, { deep: false });
+  watch(options.displayProjection, () => {
+    if (!map.value) {
+      return;
+    }
+    const center = map.value.getView().getCenter() as [number, number] | undefined;
+    pointerCoordinate.value = center ? projectMapCoordinate(center) : null;
+  });
 
   onBeforeUnmount(disposeMap);
 
   return {
     map,
     mapCssVars,
+    coordinateLabel,
+    scaleLabel,
+    projectionLabel,
+    zoomLevel,
     drawMode,
     activeTool,
     isDrawing,

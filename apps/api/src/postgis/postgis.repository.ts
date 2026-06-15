@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, OnApplicationShutdown } from "@nestjs/
 import { Pool } from "pg";
 import type {
   DatasourceConfig,
+  FeaturePage,
+  FeaturePageQuery,
   FeaturePayload,
   FeatureSummary,
   FieldMeta,
@@ -181,10 +183,23 @@ export class PostgisRepository implements OnApplicationShutdown {
   async listFeatures(
     config: DatasourceConfig,
     layer: LayerRegistration,
-    limit = 100
-  ): Promise<FeatureSummary[]> {
+    query: FeaturePageQuery
+  ): Promise<FeaturePage> {
     this.assertQueryableLayer(layer);
     const pool = this.getPool(config);
+    const sortColumn = this.readFeatureSortColumn(layer, query.sort);
+    const orderDirection = query.order === "desc" ? "desc" : "asc";
+    const limit = Number(query.limit);
+    const offset = Number(query.offset);
+    const search = (query.search ?? "").trim();
+    const values: unknown[] = [layer.geometryColumn];
+    if (search) {
+      values.push(`%${search}%`);
+    }
+    const limitIndex = values.length + 1;
+    const offsetIndex = values.length + 2;
+    values.push(limit, offset);
+    const whereClause = search ? "where to_jsonb(t)::text ilike $2" : "";
     const result = await pool.query<{ feature: FeatureSummary }>(
       `
       select jsonb_build_object(
@@ -194,12 +209,28 @@ export class PostgisRepository implements OnApplicationShutdown {
         'properties', to_jsonb(t) - $1
       ) as feature
       from ${qualifiedTable(layer)} t
-      order by ${quoteIdent(layer.primaryKey!)}::text
-      limit $2
+      ${whereClause}
+      order by ${quoteIdent(sortColumn)}::text ${orderDirection}, ${quoteIdent(layer.primaryKey!)}::text asc
+      limit $${limitIndex}
+      offset $${offsetIndex}
       `,
-      [layer.geometryColumn, limit]
+      values
     );
-    return result.rows.map((row) => row.feature);
+    const countValues = search ? [`%${search}%`] : [];
+    const countResult = await pool.query<{ total: string }>(
+      `
+      select count(*)::text as total
+      from ${qualifiedTable(layer)} t
+      ${search ? "where to_jsonb(t)::text ilike $1" : ""}
+      `,
+      countValues
+    );
+    return {
+      items: result.rows.map((row) => row.feature),
+      total: Number(countResult.rows[0]?.total ?? 0),
+      limit,
+      offset
+    };
   }
 
   async createFeature(
@@ -432,6 +463,17 @@ export class PostgisRepository implements OnApplicationShutdown {
 
   private isIntegerField(field: FieldMeta): boolean {
     return ["int2", "int4", "int8"].includes(field.udtName);
+  }
+
+  private readFeatureSortColumn(layer: LayerRegistration, sort?: string): string {
+    if (!sort) {
+      return layer.primaryKey!;
+    }
+    const allowedColumns = new Set([
+      layer.primaryKey,
+      ...layer.fields.map((field) => field.name)
+    ].filter(Boolean));
+    return allowedColumns.has(sort) ? sort : layer.primaryKey!;
   }
 
   private assertQueryableLayer(layer: LayerRegistration): void {

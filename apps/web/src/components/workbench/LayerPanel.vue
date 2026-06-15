@@ -309,7 +309,7 @@ onBeforeUnmount(() => {
 
 .layer-panel__context-menu {
   position: fixed;
-  z-index: 40;
+  z-index: var(--qgis-z-menu);
   width: 172px;
   border: 1px solid #8d8d8d;
   background: #f7f7f7;

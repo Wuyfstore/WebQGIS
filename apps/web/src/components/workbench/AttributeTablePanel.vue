@@ -2,15 +2,19 @@
 import { Close } from "@element-plus/icons-vue";
 import { useDraggable, useSorted } from "@vueuse/core";
 import { computed, shallowRef, useTemplateRef } from "vue";
-import type { FeatureSummary, FieldMeta, LayerRegistration } from "../../types/gis";
+import type { AttributeTableQuery, FeatureSummary, FieldMeta, LayerRegistration } from "../../types/gis";
 
 const props = defineProps<{
   layer: LayerRegistration;
   features: FeatureSummary[];
+  total: number;
+  query: AttributeTableQuery;
+  busy: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  query: [patch: Partial<AttributeTableQuery>];
 }>();
 
 type FieldSortKey = "name" | "type" | "nullable" | "defaultValue" | "editable";
@@ -21,9 +25,10 @@ const panelRef = useTemplateRef<HTMLElement>("panelRef");
 const handleRef = useTemplateRef<HTMLElement>("handleRef");
 const activeTab = shallowRef<ActiveTab>("records");
 const fieldSearch = shallowRef("");
-const recordSearch = shallowRef("");
+const recordSearchDraft = shallowRef("");
 const sortKey = shallowRef<FieldSortKey>("name");
 const sortDirection = shallowRef<SortDirection>("asc");
+const columnWidths = shallowRef<Record<string, number>>({});
 
 const { style: draggableStyle } = useDraggable(panelRef, {
   handle: handleRef,
@@ -33,9 +38,21 @@ const { style: draggableStyle } = useDraggable(panelRef, {
 
 const layerLabel = computed(() => `${props.layer.schema}.${props.layer.table}`);
 const normalizedFieldSearch = computed(() => fieldSearch.value.trim().toLowerCase());
-const normalizedRecordSearch = computed(() => recordSearch.value.trim().toLowerCase());
 const propertyFields = computed(() => props.layer.fields.filter((field) => field.name !== props.layer.geometryColumn));
 const displayColumns = computed(() => propertyFields.value.slice(0, 12));
+const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.query.limit)));
+const currentPage = computed(() => Math.floor(props.query.offset / props.query.limit) + 1);
+const featureLimitLabel = computed(() => (
+  props.total === 0
+    ? "0 条记录"
+    : `${props.query.offset + 1}-${props.query.offset + props.features.length} / ${props.total} 条记录`
+));
+const canGoPrevious = computed(() => props.query.offset > 0 && !props.busy);
+const canGoNext = computed(() => props.query.offset + props.query.limit < props.total && !props.busy);
+const serverSortLabel = computed(() => {
+  const sort = props.query.sort ?? props.layer.primaryKey ?? "id";
+  return `${sort} ${props.query.order === "asc" ? "升序" : "降序"}`;
+});
 const extentLabel = computed(() => (
   props.layer.extent
     ? props.layer.extent.map((value) => value.toFixed(4)).join(", ")
@@ -61,30 +78,13 @@ const filteredFields = computed(() => {
     || boolLabel(field.editable).includes(query)
   ));
 });
-const filteredRecords = computed(() => {
-  const query = normalizedRecordSearch.value;
-  if (!query) {
-    return props.features;
-  }
-  return props.features.filter((feature) => {
-    const idLabel = String(feature.id ?? "").toLowerCase();
-    const propertyText = Object.values(feature.properties)
-      .map((value) => valueLabel(value).toLowerCase())
-      .join(" ");
-    return idLabel.includes(query) || propertyText.includes(query);
-  });
-});
 const sortedFields = useSorted(filteredFields, compareFields);
 const fieldCountLabel = computed(() => (
   normalizedFieldSearch.value
     ? `${sortedFields.value.length}/${props.layer.fields.length} 个字段`
     : `${props.layer.fields.length} 个字段`
 ));
-const recordCountLabel = computed(() => (
-  normalizedRecordSearch.value
-    ? `${filteredRecords.value.length}/${props.features.length} 条记录`
-    : `${props.features.length} 条记录`
-));
+const recordCountLabel = computed(() => `${props.features.length}/${props.total} 条记录`);
 const emptyFieldLabel = computed(() => (props.layer.fields.length === 0 ? "暂无字段" : "无匹配字段"));
 const emptyRecordLabel = computed(() => (props.features.length === 0 ? "暂无属性记录" : "无匹配记录"));
 const sortControls = [
@@ -94,6 +94,14 @@ const sortControls = [
   { key: "defaultValue", label: "默认值" },
   { key: "editable", label: "可编辑" }
 ] satisfies { key: FieldSortKey; label: string }[];
+
+function columnStyle(column: string) {
+  const width = columnWidths.value[column] ?? (column === "__id" ? 96 : 136);
+  return {
+    width: `${width}px`,
+    minWidth: `${width}px`
+  };
+}
 
 function sortAriaLabel(key: FieldSortKey, label: string) {
   if (sortKey.value !== key) {
@@ -116,6 +124,52 @@ function setSort(key: FieldSortKey) {
   }
   sortKey.value = key;
   sortDirection.value = "asc";
+}
+
+function setRecordSearch() {
+  emit("query", {
+    search: recordSearchDraft.value.trim(),
+    offset: 0
+  });
+}
+
+function setPageSize(event: Event) {
+  emit("query", {
+    limit: Number((event.target as HTMLSelectElement).value),
+    offset: 0
+  });
+}
+
+function goPage(direction: -1 | 1) {
+  emit("query", {
+    offset: Math.max(0, props.query.offset + props.query.limit * direction)
+  });
+}
+
+function setServerSort(fieldName: string) {
+  const nextOrder = props.query.sort === fieldName && props.query.order === "asc" ? "desc" : "asc";
+  emit("query", {
+    sort: fieldName,
+    order: nextOrder,
+    offset: 0
+  });
+}
+
+function startColumnResize(event: PointerEvent, column: string) {
+  const startX = event.clientX;
+  const startWidth = columnWidths.value[column] ?? (column === "__id" ? 96 : 136);
+  const onMove = (moveEvent: PointerEvent) => {
+    columnWidths.value = {
+      ...columnWidths.value,
+      [column]: Math.max(72, startWidth + moveEvent.clientX - startX)
+    };
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
 }
 
 function compareFields(left: FieldMeta, right: FieldMeta) {
@@ -171,20 +225,21 @@ function boolLabel(value: boolean) {
 </script>
 
 <template>
-  <section
-    ref="panelRef"
-    class="attribute-table"
-    :style="draggableStyle"
-    role="dialog"
-    aria-modal="false"
-    aria-labelledby="attribute-table-title"
-  >
+  <Teleport to="body">
+    <section
+      ref="panelRef"
+      class="attribute-table"
+      :style="draggableStyle"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="attribute-table-title"
+    >
     <header ref="handleRef" class="attribute-table__header">
       <div class="attribute-table__title-group">
         <h2 id="attribute-table-title" class="attribute-table__title">
           属性表 - {{ layerLabel }}
         </h2>
-        <span class="attribute-table__subtitle">{{ recordCountLabel }} · {{ fieldCountLabel }}</span>
+        <span class="attribute-table__subtitle">{{ recordCountLabel }} · {{ fieldCountLabel }} · {{ serverSortLabel }}</span>
       </div>
       <button class="attribute-table__close focus-ring" type="button" aria-label="关闭属性表" @click="emit('close')">
         <Close class="attribute-table__close-icon" aria-hidden="true" />
@@ -251,27 +306,58 @@ function boolLabel(value: boolean) {
     <template v-if="activeTab === 'records'">
       <section class="attribute-table__controls" aria-label="属性记录浏览">
         <label class="attribute-table__filter">
-          <span class="attribute-table__filter-label">记录过滤</span>
+          <span class="attribute-table__filter-label">服务端过滤</span>
           <input
-            v-model="recordSearch"
+            v-model="recordSearchDraft"
             class="attribute-table__filter-input focus-ring"
             type="search"
             aria-label="过滤属性记录"
             placeholder="主键 / 属性值"
+            @keydown.enter="setRecordSearch"
           />
         </label>
+        <button class="attribute-table__pager-button focus-ring" :disabled="busy" type="button" @click="setRecordSearch">
+          查询
+        </button>
+        <label class="attribute-table__page-size">
+          <span>每页</span>
+          <select class="attribute-table__page-select focus-ring" :value="query.limit" :disabled="busy" @change="setPageSize">
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+            <option :value="200">200</option>
+          </select>
+        </label>
+        <div class="attribute-table__pager" aria-label="属性表分页">
+          <button class="attribute-table__pager-button focus-ring" :disabled="!canGoPrevious" type="button" @click="goPage(-1)">
+            上一页
+          </button>
+          <span class="attribute-table__limit-note">{{ featureLimitLabel }} · 第 {{ currentPage }}/{{ totalPages }} 页</span>
+          <button class="attribute-table__pager-button focus-ring" :disabled="!canGoNext" type="button" @click="goPage(1)">
+            下一页
+          </button>
+        </div>
       </section>
 
       <div class="attribute-table__table-wrap">
         <table class="attribute-table__table">
           <thead>
             <tr>
-              <th class="attribute-table__id-col" scope="col">{{ layer.primaryKey ?? "id" }}</th>
-              <th v-for="field in displayColumns" :key="field.name" scope="col">{{ field.name }}</th>
+              <th class="attribute-table__id-col" scope="col" :style="columnStyle('__id')">
+                <button class="attribute-table__record-sort focus-ring" type="button" @click="setServerSort(layer.primaryKey ?? 'id')">
+                  {{ layer.primaryKey ?? "id" }}
+                </button>
+                <span class="attribute-table__resize-handle" @pointerdown.prevent="startColumnResize($event, '__id')"></span>
+              </th>
+              <th v-for="field in displayColumns" :key="field.name" scope="col" :style="columnStyle(field.name)">
+                <button class="attribute-table__record-sort focus-ring" type="button" @click="setServerSort(field.name)">
+                  {{ field.name }}
+                </button>
+                <span class="attribute-table__resize-handle" @pointerdown.prevent="startColumnResize($event, field.name)"></span>
+              </th>
             </tr>
           </thead>
-          <tbody v-if="filteredRecords.length > 0">
-            <tr v-for="feature in filteredRecords" :key="String(feature.id ?? JSON.stringify(feature.properties))">
+          <tbody v-if="features.length > 0">
+            <tr v-for="feature in features" :key="String(feature.id ?? JSON.stringify(feature.properties))">
               <th scope="row">{{ valueLabel(feature.id) }}</th>
               <td v-for="field in displayColumns" :key="field.name">
                 {{ valueLabel(feature.properties[field.name]) }}
@@ -335,13 +421,14 @@ function boolLabel(value: boolean) {
         </table>
       </div>
     </template>
-  </section>
+    </section>
+  </Teleport>
 </template>
 
 <style scoped>
 .attribute-table {
   position: fixed;
-  z-index: 28;
+  z-index: var(--qgis-z-floating-panel);
   width: min(1080px, calc(100vw - 32px));
   max-height: min(580px, calc(100vh - 32px));
   border: 1px solid #8d8d8d;
@@ -489,6 +576,8 @@ function boolLabel(value: boolean) {
 .attribute-table__controls {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   border-bottom: 1px solid #c8c8c8;
   padding: 8px 10px;
   background: #f5f5f5;
@@ -496,7 +585,7 @@ function boolLabel(value: boolean) {
 
 .attribute-table__filter {
   display: grid;
-  width: min(360px, 100%);
+  width: min(320px, 100%);
   grid-template-columns: 64px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
@@ -514,6 +603,41 @@ function boolLabel(value: boolean) {
   background: var(--qgis-input);
   color: var(--qgis-text);
   padding: 3px 7px;
+}
+
+.attribute-table__page-size,
+.attribute-table__pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.attribute-table__page-select,
+.attribute-table__pager-button {
+  min-height: 24px;
+  border: 1px solid #9a9a9a;
+  background: #e8e8e8;
+  color: var(--qgis-text);
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.attribute-table__page-select {
+  background: #ffffff;
+}
+
+.attribute-table__pager-button:disabled,
+.attribute-table__page-select:disabled {
+  color: var(--qgis-muted);
+  opacity: 0.7;
+}
+
+.attribute-table__limit-note {
+  color: var(--qgis-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .attribute-table__table-wrap {
@@ -553,6 +677,32 @@ function boolLabel(value: boolean) {
   font-weight: 600;
   padding: 0;
   z-index: 1;
+}
+
+.attribute-table__record-sort {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 5px 18px 5px 8px;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+}
+
+.attribute-table__record-sort:hover {
+  background: var(--qgis-row-active);
+}
+
+.attribute-table__resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
 }
 
 .attribute-table__table tbody th {
@@ -605,6 +755,15 @@ function boolLabel(value: boolean) {
 
   .attribute-table__filter {
     grid-template-columns: 1fr;
+  }
+
+  .attribute-table__controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .attribute-table__limit-note {
+    white-space: normal;
   }
 }
 </style>

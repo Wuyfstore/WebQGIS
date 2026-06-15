@@ -5,6 +5,8 @@ import { getEditableFields, getLayerStatus } from "../utils/layer";
 import type {
   Datasource,
   DatasourceForm,
+  AttributeTableQuery,
+  FeaturePage,
   FeatureSummary,
   GeoJsonFeature,
   LayerRegistration,
@@ -37,6 +39,14 @@ export function useWebGisWorkspace() {
   const draftGeometry = shallowRef<unknown>(null);
   const displayProjection = shallowRef("EPSG:3857");
   const attributeTableFeatures = shallowRef<FeatureSummary[]>([]);
+  const attributeTableTotal = shallowRef(0);
+  const attributeTableQuery = shallowRef<AttributeTableQuery>({
+    limit: 100,
+    offset: 0,
+    search: "",
+    sort: undefined,
+    order: "asc"
+  });
   const attributeTableLayerId = shallowRef<string | null>(null);
   const datasourceForm = reactive(defaultDatasourceForm());
 
@@ -209,23 +219,72 @@ export function useWebGisWorkspace() {
     });
   }
 
-  async function openAttributeTable(layerId: string) {
+  function buildFeaturePageUrl(layerId: string, query: AttributeTableQuery) {
+    const params = new URLSearchParams({
+      limit: String(query.limit),
+      offset: String(query.offset),
+      search: query.search,
+      order: query.order
+    });
+    if (query.sort) {
+      params.set("sort", query.sort);
+    }
+    return `/api/layers/${layerId}/features?${params.toString()}`;
+  }
+
+  async function loadAttributeTablePage(layerId: string, query: AttributeTableQuery) {
+    const page = await apiGet<FeaturePage>(buildFeaturePageUrl(layerId, query));
+    attributeTableFeatures.value = page.items;
+    attributeTableTotal.value = page.total;
+    attributeTableQuery.value = {
+      ...query,
+      limit: page.limit,
+      offset: page.offset
+    };
+    return page;
+  }
+
+  async function openAttributeTable(layerId: string, queryPatch: Partial<AttributeTableQuery> = {}) {
     const layer = layers.value.find((item) => item.id === layerId);
     if (!layer?.queryable) {
       setStatus("当前图层不可打开属性表", "warning");
       return;
     }
     activeLayerId.value = layer.id;
+    const nextQuery: AttributeTableQuery = {
+      limit: 100,
+      offset: 0,
+      search: "",
+      sort: layer.primaryKey ?? undefined,
+      order: "asc",
+      ...queryPatch
+    };
     await withBusy(async () => {
-      attributeTableFeatures.value = await apiGet<FeatureSummary[]>(`/api/layers/${layer.id}/features`);
+      const page = await loadAttributeTablePage(layer.id, nextQuery);
       attributeTableLayerId.value = layer.id;
-      setStatus(`已打开属性表：${layer.schema}.${layer.table}，读取 ${attributeTableFeatures.value.length} 条属性`, "success");
+      setStatus(`已打开属性表：${layer.schema}.${layer.table}，读取 ${page.items.length}/${page.total} 条属性`, "success");
+    });
+  }
+
+  async function updateAttributeTableQuery(queryPatch: Partial<AttributeTableQuery>) {
+    const layer = attributeTableLayer.value;
+    if (!layer) {
+      return;
+    }
+    const nextQuery: AttributeTableQuery = {
+      ...attributeTableQuery.value,
+      ...queryPatch
+    };
+    await withBusy(async () => {
+      const page = await loadAttributeTablePage(layer.id, nextQuery);
+      setStatus(`已刷新属性表：${layer.schema}.${layer.table}，读取 ${page.items.length}/${page.total} 条属性`, "success");
     });
   }
 
   function closeAttributeTable() {
     attributeTableLayerId.value = null;
     attributeTableFeatures.value = [];
+    attributeTableTotal.value = 0;
   }
 
   async function saveFeature() {
@@ -278,6 +337,8 @@ export function useWebGisWorkspace() {
     activeLayer,
     attributeTableLayer,
     attributeTableFeatures,
+    attributeTableTotal,
+    attributeTableQuery,
     visibleLayerIds,
     visibleLayers,
     displayProjection,
@@ -303,6 +364,7 @@ export function useWebGisWorkspace() {
     restorePreviousVisibleLayers,
     readFeature,
     openAttributeTable,
+    updateAttributeTableQuery,
     closeAttributeTable,
     saveFeature,
     deleteSelectedFeature,

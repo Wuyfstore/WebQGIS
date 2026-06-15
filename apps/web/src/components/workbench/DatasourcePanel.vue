@@ -364,7 +364,7 @@ watch(
 
 .datasource-panel__context-menu {
   position: fixed;
-  z-index: 40;
+  z-index: var(--qgis-z-menu);
   width: 180px;
   border: 1px solid #8d8d8d;
   background: #f7f7f7;
@@ -401,7 +401,7 @@ watch(
 .datasource-panel__dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 35;
+  z-index: var(--qgis-z-modal);
   display: grid;
   place-items: center;
   padding: 24px;

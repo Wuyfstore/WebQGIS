@@ -79,6 +79,21 @@ export type FeatureSummary = {
   properties: Record<string, unknown>;
 };
 
+export type FeaturePageQuery = {
+  limit: number;
+  offset: number;
+  search: string;
+  sort?: string;
+  order: "asc" | "desc";
+};
+
+export type FeaturePage = {
+  items: FeatureSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export function toPoolConfig(config: DatasourceConfig): PoolConfig {
   return {
     host: config.host,

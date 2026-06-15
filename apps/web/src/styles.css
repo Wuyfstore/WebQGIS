@@ -28,6 +28,9 @@
   --qgis-danger: #9a1c1c;
   --qgis-map-bg: #f6f4e9;
   --qgis-map-grid: #d7d0b9;
+  --qgis-z-floating-panel: 30;
+  --qgis-z-menu: 40;
+  --qgis-z-modal: 50;
 }
 
 * {
