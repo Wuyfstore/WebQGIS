@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <style>
+      .ui{font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",Arial,sans-serif;font-size:12px;fill:#1f1f1f}
+      .small{font-size:11px}.tiny{font-size:10px}.title{font-size:13px;font-weight:600}.brand{font-size:15px;font-weight:700}
+      .dock-title{fill:#d7d7d7;stroke:#9f9f9f}.panel{fill:#f3f3f3;stroke:#9f9f9f}.pane{fill:#fafafa;stroke:#b7b7b7}
+      .toolbar{fill:#e4e4e4;stroke:#a5a5a5}.menubar{fill:#eeeeee;stroke:#a9a9a9}.active{fill:#cfe8ff;stroke:#4b8edb}
+      .button{fill:#efefef;stroke:#8d8d8d}.button-on{fill:#b8d6f0;stroke:#4d86ba}.input{fill:#fff;stroke:#aeb6bf}
+      .muted{fill:#5f6670}.green{fill:#2f6f3e}.blue{fill:#145aa3}.warn{fill:#915c00}.danger{fill:#9a1c1c}
+      .map-bg{fill:#f6f4e9}.grid{stroke:#d7d0b9;stroke-width:1}.parcel{fill:#d7dfc3;stroke:#6c8460;stroke-width:1.5}.parcel2{fill:#d9e2dd;stroke:#658178;stroke-width:1.5}
+      .selected{fill:#f6a85d;fill-opacity:.86;stroke:#e96b13;stroke-width:2}.road{fill:none;stroke:#dcb867;stroke-width:9;stroke-linecap:round}.road-core{fill:none;stroke:#fff1bf;stroke-width:5;stroke-linecap:round}
+      .river{fill:none;stroke:#9fcde3;stroke-width:18;stroke-linecap:round}.river-core{fill:none;stroke:#b9e0ef;stroke-width:9;stroke-linecap:round}
+      .shadow{filter:url(#shadow)}.mono{font-family:Consolas,"Cascadia Mono",monospace}
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="3" stdDeviation="3" flood-color="#000" flood-opacity=".22"/>
+    </filter>
+    <pattern id="mapGrid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" class="grid" fill="none"/>
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#d8d8d8"/>
+  <g class="ui">
+    <!-- Menu bar based on observed QGIS 3.44 plus current WebQGIS menus -->
+    <rect class="menubar" x="0" y="0" width="1600" height="28"/>
+    <text class="brand" x="12" y="19">WebQGIS</text>
+    <text x="106" y="18">项目</text><text x="150" y="18">编辑</text><text x="194" y="18">视图</text><text x="238" y="18">图层</text>
+    <text x="282" y="18">设置</text><text x="326" y="18">插件</text><text x="370" y="18">矢量</text><text x="414" y="18">栅格</text>
+    <text x="458" y="18">数据库</text><text x="514" y="18">Web</text><text x="554" y="18">网孔</text><text x="596" y="18">数据处理</text><text x="670" y="18">帮助</text>
+    <text class="green" x="1260" y="18">PostgreSQL: Local PostGIS / public</text>
+
+    <rect class="toolbar" x="0" y="28" width="1600" height="34"/>
+    <g transform="translate(10 34)">
+      <rect class="button" x="0" y="0" width="26" height="24"/><text x="7" y="16">新</text>
+      <rect class="button" x="32" y="0" width="26" height="24"/><text x="39" y="16">存</text>
+      <rect class="button" x="64" y="0" width="26" height="24"/><text x="71" y="16">撤</text>
+      <rect class="button-on" x="104" y="0" width="26" height="24"/><text x="111" y="16">选</text>
+      <rect class="button" x="136" y="0" width="26" height="24"/><text x="143" y="16">移</text>
+      <rect class="button" x="168" y="0" width="26" height="24"/><text x="175" y="16">放</text>
+      <rect class="button" x="200" y="0" width="26" height="24"/><text x="207" y="16">识</text>
+      <line x1="238" x2="238" y1="1" y2="23" stroke="#9b9b9b"/>
+      <rect class="button" x="250" y="0" width="26" height="24"/><text x="257" y="16">点</text>
+      <rect class="button" x="282" y="0" width="26" height="24"/><text x="289" y="16">线</text>
+      <rect class="button-on" x="314" y="0" width="26" height="24"/><text x="321" y="16">面</text>
+      <rect class="button" x="346" y="0" width="38" height="24"/><text x="353" y="16">节点</text>
+      <rect class="button-on" x="390" y="0" width="32" height="24"/><text x="397" y="16">吸</text>
+      <rect class="button" x="428" y="0" width="32" height="24"/><text x="435" y="16">校</text>
+      <rect class="button" x="466" y="0" width="32" height="24"/><text x="473" y="16">刷</text>
+      <line x1="512" x2="512" y1="1" y2="23" stroke="#9b9b9b"/>
+      <rect class="button" x="524" y="0" width="26" height="24"/><text class="tiny" x="530" y="16">Gp</text>
+      <rect class="button" x="556" y="0" width="26" height="24"/><text class="tiny" x="562" y="16">Sh</text>
+      <rect class="button" x="588" y="0" width="26" height="24"/><text class="tiny" x="594" y="16">Sp</text>
+      <rect class="button" x="620" y="0" width="26" height="24"/><text class="tiny" x="626" y="16">Pg</text>
+      <rect class="button" x="652" y="0" width="26" height="24"/><text class="tiny" x="658" y="16">MVT</text>
+    </g>
+
+    <rect class="toolbar" x="0" y="62" width="1600" height="32"/>
+    <text class="muted" x="12" y="82">活动图层:</text>
+    <rect class="input" x="82" y="68" width="270" height="21"/><text x="94" y="83">public.parcels | Polygon | EPSG:4326</text>
+    <text class="muted" x="384" y="82">编辑:</text><rect class="button-on" x="424" y="68" width="76" height="21"/><text class="blue" x="450" y="83">开启</text>
+    <text class="muted" x="530" y="82">捕捉:</text><rect class="input" x="580" y="68" width="140" height="21"/><text x="594" y="83">顶点 + 线段, 8 px</text>
+    <text class="muted" x="748" y="82">显示链路: MVT</text><text class="muted" x="872" y="82">编辑链路: 原始 PostGIS geometry</text>
+    <text class="warn" x="1190" y="82">数据库事务: 草稿未保存</text>
+
+    <!-- Left dock -->
+    <rect class="panel" x="0" y="94" width="330" height="866"/>
+    <rect class="dock-title" x="0" y="94" width="330" height="26"/><text class="title" x="10" y="112">浏览器</text><text class="muted" x="304" y="112">□</text>
+    <rect class="input" x="10" y="128" width="310" height="24"/><text class="muted small" x="22" y="144">过滤 schema / table / 图层</text>
+    <text x="16" y="174">▾ 收藏夹</text>
+    <text x="16" y="194">▾ 空间书签</text>
+    <text x="16" y="214">▸ 主目录</text>
+    <text x="16" y="234">▸ C:\</text>
+    <text x="16" y="254">▸ D:\ (新加卷)</text>
+    <text x="16" y="278">▸ GeoPackage</text>
+    <text x="16" y="298">▸ SpatiaLite</text>
+    <g class="shadow">
+      <rect x="60" y="304" width="186" height="82" fill="#f7f7f7" stroke="#8d8d8d"/>
+      <text x="76" y="326">新建连接...</text>
+      <text x="76" y="350">刷新</text>
+      <text x="76" y="374">连接管理</text>
+    </g>
+    <text class="title" x="16" y="322">▾ PostgreSQL</text>
+    <text x="34" y="344">▾ Local PostGIS</text>
+    <text x="52" y="366">▾ public</text>
+    <rect class="active" x="50" y="374" width="255" height="23"/><text class="blue" x="66" y="390">□ parcels</text><text class="muted small" x="205" y="390">Polygon</text>
+    <text x="66" y="416">□ roads</text><text class="muted small" x="205" y="416">LineString</text>
+    <text x="66" y="438">□ sensors</text><text class="muted small" x="205" y="438">Point</text>
+    <text x="16" y="464">▸ Oracle</text>
+    <text x="16" y="486">▸ WMS/WMTS</text>
+    <text x="16" y="508">▾ XYZ 切片</text>
+    <text class="small" x="34" y="528">Mapzen Global Terrain</text>
+    <text class="small" x="34" y="548">OpenStreetMap</text>
+
+    <rect class="dock-title" x="0" y="574" width="330" height="26"/><text class="title" x="10" y="592">图层</text><text class="muted" x="238" y="592">2 可编辑</text>
+    <rect class="active" x="8" y="608" width="315" height="31"/><text x="20" y="628">☑</text><rect x="42" y="620" width="18" height="10" fill="#d7dfc3" stroke="#6c8460"/><text class="title" x="72" y="628">public.parcels</text><text class="green small" x="226" y="628">可编辑</text>
+    <rect class="pane" x="8" y="639" width="315" height="31"/><text x="20" y="659">☑</text><line x1="43" y1="654" x2="61" y2="646" stroke="#b89752" stroke-width="5"/><text x="72" y="659">public.roads</text><text class="blue small" x="226" y="659">可查询</text>
+    <rect class="pane" x="8" y="670" width="315" height="31"/><text x="20" y="690">☐</text><circle cx="52" cy="685" r="5" fill="#78a86b"/><text x="72" y="690">public.sensors</text><text class="warn small" x="226" y="690">只读</text>
+    <g class="shadow">
+      <rect x="112" y="624" width="205" height="112" fill="#f7f7f7" stroke="#8d8d8d"/>
+      <text x="128" y="648">独显图层</text>
+      <text x="128" y="674">恢复上次可见性</text>
+      <text x="128" y="700">缩放到图层</text>
+      <text x="128" y="726">打开属性表</text>
+    </g>
+
+    <rect class="dock-title" x="0" y="736" width="330" height="26"/><text class="title" x="10" y="754">图层样式</text>
+    <rect class="pane" x="12" y="774" width="304" height="142"/>
+    <rect x="74" y="800" width="58" height="28" fill="#d7dfc3" stroke="#6c8460"/><text x="148" y="818">单一符号 · 半透明面</text>
+    <text class="muted" x="24" y="852">填充</text><rect x="74" y="840" width="46" height="22" fill="#d7dfc3" stroke="#8f8f8f"/><text class="muted" x="148" y="856">#D7DFC3 / 52%</text>
+    <text class="muted" x="24" y="882">线宽</text><line x1="74" y1="878" x2="142" y2="878" stroke="#6c8460" stroke-width="4"/><text class="muted" x="148" y="882">1.4 px</text>
+
+    <!-- Map canvas -->
+    <rect x="330" y="94" width="910" height="866" class="map-bg"/>
+    <rect x="330" y="94" width="910" height="866" fill="url(#mapGrid)"/>
+    <path class="river" d="M365 742 C475 690 565 688 675 710 S842 682 956 694 1040 760 1212 648"/>
+    <path class="river-core" d="M365 742 C475 690 565 688 675 710 S842 682 956 694 1040 760 1212 648"/>
+    <path class="road" d="M360 258 C512 330 632 390 724 508 S867 654 902 660 1012 790 1114 814 1180 838 1214 846"/>
+    <path class="road-core" d="M360 258 C512 330 632 390 724 508 S867 654 902 660 1012 790 1114 814 1180 838 1214 846"/>
+    <polygon class="parcel" points="468,208 650,238 618,372 450,340"/>
+    <polygon class="parcel2" points="676,246 840,270 814,420 650,382"/>
+    <polygon class="parcel" points="520,430 710,444 690,600 486,580"/>
+    <polygon class="parcel2" points="734,456 930,474 910,626 710,604"/>
+    <polygon class="selected" points="780,230 1012,260 980,430 760,400"/>
+    <circle cx="780" cy="230" r="6" fill="#fff" stroke="#e96b13" stroke-width="2"/><circle cx="1012" cy="260" r="6" fill="#fff" stroke="#e96b13" stroke-width="2"/>
+    <circle cx="980" cy="430" r="6" fill="#fff" stroke="#e96b13" stroke-width="2"/><circle cx="760" cy="400" r="6" fill="#fff" stroke="#e96b13" stroke-width="2"/>
+    <circle cx="1016" cy="266" r="12" fill="none" stroke="#2c9b57" stroke-width="2"/><line x1="1028" y1="266" x2="1090" y2="266" stroke="#2c9b57"/><text class="green small" x="1096" y="270">捕捉候选</text>
+
+    <g class="shadow">
+      <rect class="pane" x="348" y="112" width="344" height="84"/>
+      <rect class="dock-title" x="348" y="112" width="344" height="25"/><text class="title" x="360" y="130">编辑图层: public.parcels</text>
+      <text class="muted" x="360" y="158">MVT 浏览，点击要素后回源读取原始 PostGIS geometry</text>
+      <text class="warn" x="360" y="182">未保存: 1 处几何变更 · 保存前执行 ST_IsValid</text>
+    </g>
+    <g class="shadow">
+      <rect class="pane" x="1076" y="112" width="144" height="138"/>
+      <rect class="dock-title" x="1076" y="112" width="144" height="24"/><text class="small" x="1090" y="129">地图总览</text>
+      <rect x="1096" y="148" width="104" height="76" fill="#efeccf" stroke="#b8ae7a"/>
+      <rect x="1124" y="172" width="48" height="31" fill="#d7dfc3" stroke="#6c8460"/>
+      <rect x="1174" y="227" width="24" height="12" fill="#4b7bb0"/>
+      <text class="muted tiny" x="1090" y="242">滚轮缩放 · Shift+框选 · 右键菜单</text>
+    </g>
+
+    <!-- Right inspector -->
+    <rect class="panel" x="1240" y="94" width="360" height="866"/>
+    <rect class="dock-title" x="1240" y="94" width="360" height="26"/><text class="title" x="1252" y="112">图层与要素属性</text>
+    <rect class="pane" x="1254" y="132" width="330" height="102"/>
+    <text class="brand" x="1268" y="162">public.parcels</text>
+    <text class="muted" x="1268" y="182">Polygon / MultiPolygon · SRID 4326 · primary key: id</text>
+    <rect class="button-on" x="1268" y="194" width="72" height="23"/><text class="blue" x="1286" y="210">可编辑</text>
+    <rect class="button" x="1346" y="194" width="78" height="23"/><text x="1360" y="210">空间索引</text>
+    <rect class="button" x="1430" y="194" width="78" height="23"/><text x="1444" y="210">事务保存</text>
+
+    <rect class="dock-title" x="1254" y="254" width="330" height="25"/><text class="title" x="1266" y="272">属性表单</text>
+    <rect class="pane" x="1254" y="279" width="330" height="274"/>
+    <text class="muted" x="1278" y="306">id</text><rect class="input" x="1354" y="292" width="206" height="21"/><text class="muted" x="1364" y="307">1024</text>
+    <text class="muted" x="1278" y="337">name</text><rect class="input" x="1354" y="323" width="206" height="21"/><text x="1364" y="338">锦江区地块 A-18</text>
+    <text class="muted" x="1278" y="368">landuse</text><rect class="input" x="1354" y="354" width="206" height="21"/><text x="1364" y="369">residential</text>
+    <text class="muted" x="1278" y="399">area_m2</text><rect class="input" x="1354" y="385" width="206" height="21"/><text x="1364" y="400">12450.8</text>
+    <text class="muted" x="1278" y="430">updated_at</text><rect class="input" x="1354" y="416" width="206" height="21"/><text class="muted" x="1364" y="431">2026-06-12 00:40</text>
+    <rect class="button-on" x="1264" y="466" width="96" height="29"/><text class="blue" x="1296" y="485">保存</text>
+    <rect class="button" x="1372" y="466" width="96" height="29"/><text x="1404" y="485">回滚</text>
+    <rect x="1478" y="466" width="68" height="29" fill="#f3dddd" stroke="#b88b8b"/><text class="danger" x="1494" y="485">删除</text>
+
+    <rect class="dock-title" x="1254" y="574" width="330" height="25"/><text class="title" x="1266" y="592">保存校验</text>
+    <rect class="pane" x="1254" y="599" width="330" height="100"/>
+    <text class="green small" x="1276" y="622">✓ SRID 可转换到地图坐标系</text>
+    <text class="green small" x="1276" y="646">✓ 几何类型符合 Polygon</text>
+    <text class="warn small" x="1276" y="670">△ 未检测到 version 字段，保存可能覆盖</text>
+    <text class="muted tiny" x="1276" y="690">失败时保留草稿，不破坏原表数据</text>
+
+    <rect class="dock-title" x="1254" y="720" width="330" height="25"/><text class="title" x="1266" y="738">SQL / 审计预览</text>
+    <rect class="pane" x="1254" y="745" width="330" height="92"/>
+    <text class="mono tiny" x="1270" y="768">UPDATE public.parcels</text>
+    <text class="mono tiny" x="1270" y="789">SET geom = ST_GeomFromGeoJSON(?), name = ?</text>
+    <text class="mono tiny" x="1270" y="810">WHERE id = 1024;</text>
+    <text class="muted tiny" x="1270" y="830">保存成功后刷新当前 MVT source 与属性表</text>
+
+    <g class="shadow">
+      <rect x="520" y="804" width="575" height="118" fill="#fff8d6" stroke="#d3a64d"/>
+      <text class="title" x="542" y="830">新版操作主线</text>
+      <text x="542" y="856">1. 浏览器树按 QGIS: 本地文件、GeoPackage、SpatiaLite、PostgreSQL、XYZ/WMS 等入口组织</text>
+      <text x="542" y="882">2. PostgreSQL 节点右键: 新建连接 / 刷新 / 连接管理，弹窗保存并测试</text>
+      <text x="542" y="908">3. 图层右键: 独显、恢复可见性、缩放到图层、打开属性表；地图仍走 MVT 浏览 + PostGIS 写回</text>
+    </g>
+
+    <rect class="menubar" x="0" y="960" width="1600" height="40"/>
+    <text x="12" y="984">坐标 104.0648, 30.6572</text>
+    <text x="208" y="984">比例尺 1:2500</text>
+    <text x="326" y="984">EPSG:3857 显示 / EPSG:4326 数据源</text>
+    <text class="green" x="604" y="984">捕捉: 顶点+线段 8 px</text>
+    <text class="warn" x="780" y="984">数据库事务: 待保存</text>
+    <text class="muted" x="1006" y="984">QGIS 实测: 菜单栏、多排工具栏、浏览器树、停靠面板、状态栏</text>
+  </g>
+</svg>

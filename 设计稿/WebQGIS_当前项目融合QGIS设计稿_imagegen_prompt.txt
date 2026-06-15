@@ -1,0 +1,14 @@
+Use case: ui-mockup
+Asset type: WebQGIS desktop GIS application UI design mockup
+Primary request: Generate a high-fidelity UI mockup for WebQGIS that combines the current project's implemented UI structure with observed QGIS Desktop 3.44 layout and workflow behavior.
+Scene/backdrop: full desktop GIS workbench, 16:10 landscape frame, no browser chrome, dense professional GIS software.
+Subject: WebQGIS interface for PostgreSQL/PostGIS data browsing, PostGIS connection management, MVT map browsing, original PostGIS geometry editing, layer styling, attribute editing, and SQL audit preview.
+Style/medium: precise product UI mockup, QGIS-like desktop application, restrained operational interface, not a landing page and not a dashboard card layout.
+Composition/framing: top menu bar, two compact toolbar rows, context bar, left dock with Browser / Layers / Layer Style panels, central map canvas, right dock with Layer and Feature Properties / Attribute Form / Save Validation / SQL Audit Preview panels, bottom status bar.
+QGIS observed reference details: menu labels include "项目", "编辑", "视图", "图层", "设置", "插件", "矢量", "栅格", "数据库", "Web", "网孔", "数据处理", "帮助"; Browser tree includes "收藏夹", "空间书签", "主目录", local drives, "GeoPackage", "SpatiaLite", "PostgreSQL", "Oracle", "WMS/WMTS", "XYZ 切片"; QGIS uses dense icon toolbars, dock panels, and a bottom status bar.
+Current WebQGIS details to preserve: existing menus, toolbar actions 新建 / 保存 / 撤销 / 选择 / 平移 / 缩放 / 识别 / 点 / 线 / 面 / 节点 / 吸附 / 校验 / 刷新; left datasource panel with PostgreSQL node right-click menu "新建连接..." / "刷新" / "连接管理"; PostGIS connection dialog concept; layer context menu "独显图层" / "恢复上次可见性" / "缩放到图层" / "打开属性表"; right inspector with "图层与要素属性", "属性表单", "保存校验", "SQL / 审计预览"; status text for MVT display path and original PostGIS geometry editing path.
+Map content: pale beige map canvas with grid, parcels, roads, river, one selected polygon in orange with editable vertices, a green snap candidate marker, and a small overview map.
+Color palette: QGIS-like light gray chrome, white panels, pale blue active selection, green editable/status accents, muted beige map, subdued vector layer colors.
+Text (verbatim): "WebQGIS", "PostgreSQL: Local PostGIS / public", "public.parcels", "MVT", "PostGIS", "新建连接...", "刷新", "连接管理", "打开属性表", "SQL / 审计预览".
+Constraints: dense and operational, practical controls, all text readable and fitting, 8px or smaller radii, no decorative gradient orbs, no hero layout, no oversized cards, no stock imagery, no cartoon illustration, no dark theme, no watermark.
+Avoid: fantasy map, marketing copy, blurred text, one-note purple/blue palette, mobile layout, empty unrealistic panels.
