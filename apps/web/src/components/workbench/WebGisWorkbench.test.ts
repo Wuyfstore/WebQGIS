@@ -265,6 +265,49 @@ describe("WebGisWorkbench", () => {
     document.body.innerHTML = "";
   });
 
+  it("closes and switches top menu popovers with desktop menu interactions", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+
+    const menuButton = (label: string) => wrapper.findAll(".workbench__menu-item")
+      .find((item) => item.text() === label);
+
+    await menuButton("数据库")?.trigger("click");
+    expect(wrapper.text()).toContain("新建 PostgreSQL 连接...");
+
+    await menuButton("数据库")?.trigger("click");
+    expect(wrapper.text()).not.toContain("新建 PostgreSQL 连接...");
+
+    await menuButton("数据库")?.trigger("click");
+    expect(wrapper.text()).toContain("新建 PostgreSQL 连接...");
+    await menuButton("图层")?.trigger("click");
+    expect(wrapper.text()).not.toContain("新建 PostgreSQL 连接...");
+    expect(wrapper.text()).toContain("刷新图层列表");
+
+    window.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("刷新图层列表");
+
+    await menuButton("数据库")?.trigger("click");
+    expect(wrapper.text()).toContain("新建 PostgreSQL 连接...");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("新建 PostgreSQL 连接...");
+
+    await menuButton("数据库")?.trigger("click");
+    const command = wrapper.findAll(".workbench__menu-command")
+      .find((item) => item.text() === "显示链路说明")
+      ?? wrapper.findAll(".workbench__menu-command")
+        .find((item) => item.text() === "新建 PostgreSQL 连接...");
+    await command?.trigger("click");
+    expect(wrapper.text()).not.toContain("新建 PostgreSQL 连接...");
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
+  });
+
   it("renders toolbar actions with icon components", () => {
     const wrapper = mount(WebGisWorkbench);
 
@@ -433,6 +476,10 @@ describe("WebGisWorkbench", () => {
     expect(document.querySelector(".attribute-table__header")).not.toBeNull();
     expect(document.body.textContent).toContain("1-2 / 128 条记录");
     expect(document.body.textContent).toContain("第 1/2 页");
+    let tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab"));
+    expect(tabs[0].classList.contains("attribute-table__tab--active")).toBe(true);
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(tabs[1].classList.contains("attribute-table__tab--active")).toBe(false);
 
     Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
       .find((button) => button.textContent?.trim() === "下一页")
@@ -463,6 +510,11 @@ describe("WebGisWorkbench", () => {
 
     await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[1].click();
     await flushPromises();
+    tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab"));
+    expect(tabs[0].classList.contains("attribute-table__tab--active")).toBe(false);
+    expect(tabs[0].getAttribute("aria-selected")).toBe("false");
+    expect(tabs[1].classList.contains("attribute-table__tab--active")).toBe(true);
+    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
 
     expect(document.body.textContent).toContain("3 个字段");
     expect(document.body.textContent).toContain("adcode");

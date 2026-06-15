@@ -16,7 +16,7 @@ import {
   RefreshLeft,
   Search
 } from "@element-plus/icons-vue";
-import { computed, nextTick, onMounted, shallowRef, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, type Component } from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import AttributeTablePanel from "./AttributeTablePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
@@ -29,6 +29,7 @@ import { getGeometryModes } from "../../utils/layer";
 
 const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
+const menuRef = useTemplateRef<HTMLElement>("menuRef");
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
 
@@ -290,13 +291,37 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
 ]);
 
 onMounted(async () => {
+  window.addEventListener("pointerdown", closeMenuOnOutsidePointer);
+  window.addEventListener("keydown", closeMenuOnEscape);
   await nextTick();
   await workspace.refreshAll();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointerdown", closeMenuOnOutsidePointer);
+  window.removeEventListener("keydown", closeMenuOnEscape);
 });
 
 function handleMapReady(element: HTMLDivElement) {
   mapElement.value = element;
   editor.initializeMap();
+}
+
+function closeMenuOnOutsidePointer(event: Event) {
+  if (!openMenuLabel.value) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Node && menuRef.value?.contains(target)) {
+    return;
+  }
+  openMenuLabel.value = null;
+}
+
+function closeMenuOnEscape(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    openMenuLabel.value = null;
+  }
 }
 
 function toggleMenu(label: MenuLabel) {
@@ -423,7 +448,7 @@ function validateActiveLayer() {
   <main class="workbench">
     <header class="workbench__menubar">
       <strong class="workbench__brand">WebQGIS</strong>
-      <nav class="workbench__menu" aria-label="应用菜单">
+      <nav ref="menuRef" class="workbench__menu" aria-label="应用菜单">
         <div v-for="item in menuItems" :key="item" class="workbench__menu-group">
           <button
             class="workbench__menu-item focus-ring"
@@ -707,8 +732,11 @@ function validateActiveLayer() {
 }
 
 .workbench__tool--active {
-  border-color: #4d86ba;
-  background: #b8d6f0;
+  border-color: #777777;
+  background: #cfcfcf;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -1px 0 #9d9d9d;
 }
 
 .workbench__tool--wide {

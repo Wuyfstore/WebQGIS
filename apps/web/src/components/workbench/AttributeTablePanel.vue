@@ -549,28 +549,29 @@ function boolLabel(value: boolean) {
 
 .attribute-table__tabs {
   display: flex;
-  border-bottom: 1px solid #b8b8b8;
-  background: #eeeeee;
-  padding: 4px 8px 0;
+  gap: 4px;
+  border-bottom: 1px solid #b6b6b6;
+  background: #e2e2e2;
+  padding: 5px 8px;
 }
 
 .attribute-table__tab {
   min-height: 25px;
-  border: 1px solid #9a9a9a;
-  border-bottom: 0;
-  background: #e6e6e6;
+  border: 1px solid #b6b6b6;
+  background: #d7d7d7;
   color: var(--qgis-muted);
-  padding: 4px 14px;
+  padding: 3px 14px;
   font-size: 12px;
-}
-
-.attribute-table__tab + .attribute-table__tab {
-  margin-left: 4px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .attribute-table__tab--active {
-  background: var(--qgis-pane);
+  border-color: #8f8f8f;
+  background: #c9c9c9;
   color: var(--qgis-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 #9c9c9c;
 }
 
 .attribute-table__controls {
@@ -731,7 +732,7 @@ function boolLabel(value: boolean) {
 
 .attribute-table__sort-mark {
   width: 12px;
-  color: var(--qgis-blue);
+  color: var(--qgis-muted);
   text-align: right;
 }
 
