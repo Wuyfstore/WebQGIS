@@ -56,7 +56,13 @@ select {
 }
 
 button {
+  appearance: none;
+  -webkit-appearance: none;
   cursor: pointer;
+}
+
+.focus-ring {
+  outline: none;
 }
 
 button:disabled,
