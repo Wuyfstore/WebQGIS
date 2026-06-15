@@ -1,0 +1,12 @@
+Use case: ui-mockup
+Asset type: WebGIS desktop application UI design mockup
+Primary request: Generate a high-fidelity UI mockup for WebQGIS based on QGIS desktop layout and the existing WebQGIS product direction.
+Scene/backdrop: full desktop GIS workbench, 16:10 landscape frame, no browser chrome.
+Subject: QGIS-inspired WebQGIS interface for PostGIS vector layer browsing, editing, and attribute inspection.
+Style/medium: precise product UI mockup, dense professional GIS software, not a marketing landing page.
+Composition/framing: top menu bar, two rows of compact toolbars, context bar below toolbar, left dock with Browser and Layers panels, central map canvas, right dock with layer/feature properties, bottom status bar, floating or docked attribute table panel.
+Color palette: restrained QGIS-like gray chrome, white panels, pale blue active selection, green editable/status accents, muted map beige with vector parcels, roads, and rivers.
+Text (verbatim): "WebQGIS", "项目", "编辑", "视图", "图层", "设置", "插件", "矢量", "数据库", "网络", "帮助", "PostgreSQL", "浏览器", "图层", "图层样式", "图层与要素属性", "属性表", "字段过滤", "public.china_2025_city", "MVT", "PostGIS".
+Interaction logic to convey visually: PostgreSQL tree is expanded in Browser; layer tree has visibility checkboxes, active layer highlight, context menu actions for 独显 / 恢复上次可见性 / 缩放到图层 / 打开属性表; map canvas shows selected polygon with edit vertices and snap candidate; right inspector shows attribute form and validation; attribute table supports field filtering and sortable column headers.
+Constraints: keep the interface dense and operational, 8px or smaller radii, no decorative gradient orbs, no hero layout, no marketing copy, no cartoon illustration, no oversized cards, no overlapping text, all text must fit its UI containers.
+Avoid: mobile layout, landing page, fantasy map, dark theme, colorful dashboard cards, unrealistic blank panels, blurred text, watermark.

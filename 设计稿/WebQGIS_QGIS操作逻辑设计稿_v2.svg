@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <style>
+      .bg{fill:#d8d8d8}.bar{fill:#ececec;stroke:#a7a7a7}.dock{fill:#f4f4f4;stroke:#9e9e9e}.dockTitle{fill:#d7d7d7;stroke:#9e9e9e}.pane{fill:#fafafa;stroke:#b8b8b8}.row{fill:#fff;stroke:#d0d0d0}.active{fill:#cfe8ff;stroke:#4b8edb}.input{fill:#fff;stroke:#aeb6bf}.btn{fill:#e8e8e8;stroke:#8f8f8f}.primary{fill:#d9e9f8;stroke:#6f9fc9}.map{fill:#f6f4e9}.txt{font-family:"Segoe UI","Microsoft YaHei UI",Arial,sans-serif;fill:#1f1f1f}.muted{fill:#606872}.green{fill:#2f6f3e}.blue{fill:#145aa3}.warn{fill:#925c00}.red{fill:#9a1c1c}.tiny{font-size:11px}.xs{font-size:12px}.sm{font-size:13px}.title{font-size:15px;font-weight:600}.mono{font-family:Consolas,"Cascadia Mono",monospace}.tool{fill:#efefef;stroke:#8d8d8d}.toolOn{fill:#b8d6f0;stroke:#4d86ba}.grid{stroke:#d7d0b9;opacity:.58}.parcel{fill:#d7dfc3;stroke:#778866;stroke-width:1.4}.parcel2{fill:#d3ddd6;stroke:#6d8475;stroke-width:1.4}.sel{fill:#f4ab6778;stroke:#d36a1f;stroke-width:2.2}.road0{stroke:#a88b5b;stroke-width:10;fill:none;stroke-linecap:round}.road{stroke:#f0dfac;stroke-width:7;fill:none;stroke-linecap:round}.river{stroke:#9cc6db;stroke-width:18;fill:none;stroke-linecap:round;opacity:.9}.node{fill:#fff8ef;stroke:#d36a1f;stroke-width:2}.call{fill:#fffceb;stroke:#c8aa44}
+    </style>
+    <pattern id="g" width="64" height="64" patternUnits="userSpaceOnUse"><path d="M64 0H0V64" class="grid" fill="none"/></pattern>
+  </defs>
+
+  <rect width="1600" height="1000" class="bg"/>
+
+  <rect x="0" y="0" width="1600" height="28" class="bar"/>
+  <text x="12" y="19" class="txt title">WebQGIS</text>
+  <text x="106" y="19" class="txt sm">项目</text><text x="150" y="19" class="txt sm">编辑</text><text x="194" y="19" class="txt sm">视图</text><text x="238" y="19" class="txt sm">图层</text><text x="282" y="19" class="txt sm">设置</text><text x="326" y="19" class="txt sm">插件</text><text x="370" y="19" class="txt sm">矢量</text><text x="414" y="19" class="txt sm">数据库</text><text x="470" y="19" class="txt sm">网络</text><text x="514" y="19" class="txt sm">帮助</text>
+  <text x="1260" y="19" class="txt xs green">PostgreSQL: Local PostGIS / public</text>
+
+  <rect x="0" y="28" width="1600" height="34" class="bar"/>
+  <g transform="translate(8 32)">
+    <rect x="0" y="0" width="28" height="26" class="tool"/><text x="8" y="18" class="txt xs">新</text>
+    <rect x="31" y="0" width="28" height="26" class="tool"/><text x="39" y="18" class="txt xs">存</text>
+    <rect x="62" y="0" width="28" height="26" class="tool"/><text x="70" y="18" class="txt xs">撤</text>
+    <line x1="100" y1="2" x2="100" y2="24" stroke="#9b9b9b"/>
+    <rect x="111" y="0" width="28" height="26" class="toolOn"/><text x="119" y="18" class="txt xs blue">选</text>
+    <rect x="142" y="0" width="28" height="26" class="tool"/><text x="150" y="18" class="txt xs">移</text>
+    <rect x="173" y="0" width="28" height="26" class="tool"/><text x="181" y="18" class="txt xs">缩</text>
+    <rect x="204" y="0" width="28" height="26" class="tool"/><text x="212" y="18" class="txt xs">识</text>
+    <line x1="242" y1="2" x2="242" y2="24" stroke="#9b9b9b"/>
+    <rect x="253" y="0" width="28" height="26" class="tool"/><text x="261" y="18" class="txt xs">点</text>
+    <rect x="284" y="0" width="28" height="26" class="tool"/><text x="292" y="18" class="txt xs">线</text>
+    <rect x="315" y="0" width="28" height="26" class="toolOn"/><text x="323" y="18" class="txt xs blue">面</text>
+    <rect x="346" y="0" width="28" height="26" class="tool"/><text x="354" y="18" class="txt xs">点编</text>
+    <line x1="384" y1="2" x2="384" y2="24" stroke="#9b9b9b"/>
+    <rect x="395" y="0" width="28" height="26" class="toolOn"/><text x="403" y="18" class="txt xs blue">吸</text>
+    <rect x="426" y="0" width="28" height="26" class="tool"/><text x="434" y="18" class="txt xs">校</text>
+    <rect x="457" y="0" width="28" height="26" class="tool"/><text x="465" y="18" class="txt xs">刷</text>
+  </g>
+
+  <rect x="0" y="62" width="1600" height="32" class="bar"/>
+  <text x="12" y="82" class="txt xs muted">活动图层:</text><rect x="82" y="68" width="260" height="20" class="input"/><text x="92" y="83" class="txt xs">public.china_2025_city</text>
+  <text x="366" y="82" class="txt xs muted">编辑:</text><rect x="406" y="68" width="74" height="20" class="primary"/><text x="426" y="83" class="txt xs blue">开启</text>
+  <text x="506" y="82" class="txt xs muted">捕捉:</text><rect x="548" y="68" width="136" height="20" class="input"/><text x="556" y="83" class="txt xs">顶点 + 线段, 8 px</text>
+  <text x="710" y="82" class="txt xs muted">显示链路: MVT</text><text x="824" y="82" class="txt xs muted">编辑链路: 原始 PostGIS geometry</text>
+
+  <rect x="0" y="94" width="330" height="866" class="dock"/>
+  <rect x="330" y="94" width="910" height="866" class="map"/><rect x="330" y="94" width="910" height="866" fill="url(#g)" stroke="#9f9f9f"/>
+  <rect x="1240" y="94" width="360" height="866" class="dock"/>
+
+  <rect x="0" y="94" width="330" height="25" class="dockTitle"/><text x="10" y="111" class="txt title">浏览器</text>
+  <rect x="10" y="128" width="310" height="24" class="input"/><text x="22" y="144" class="txt xs muted">过滤 schema / table / 图层</text>
+  <text x="14" y="178" class="txt xs" font-weight="600">▾ PostgreSQL</text><text x="32" y="202" class="txt xs" font-weight="600">▾ Local PostGIS</text><text x="50" y="226" class="txt xs" font-weight="600">▾ public</text>
+  <rect x="52" y="236" width="252" height="22" class="active"/><text x="62" y="252" class="txt xs blue">▣ china_2025_city</text><text x="210" y="252" class="txt tiny muted">MultiPolygon</text>
+  <text x="62" y="276" class="txt xs">▣ china_2025_county</text><text x="210" y="276" class="txt tiny muted">MultiPolygon</text>
+  <text x="62" y="300" class="txt xs">□ china_boundaries</text><text x="210" y="300" class="txt tiny muted">GEOMETRY</text>
+  <rect x="62" y="322" width="166" height="72" class="call"/><text x="72" y="342" class="txt tiny">QGIS 逻辑: 左键展开树</text><text x="72" y="362" class="txt tiny">右键 PostgreSQL</text><text x="72" y="382" class="txt tiny">新增 / 刷新 / 连接管理</text>
+
+  <rect x="0" y="420" width="330" height="25" class="dockTitle"/><text x="10" y="437" class="txt title">图层</text>
+  <rect x="8" y="454" width="314" height="28" class="active"/><text x="18" y="473" class="txt xs">☑</text><rect x="42" y="462" width="18" height="10" fill="#94d82d66" stroke="#2f9e44"/><text x="70" y="473" class="txt xs" font-weight="600">public.china_2025_city</text><text x="230" y="473" class="txt tiny green">可编辑</text>
+  <rect x="8" y="483" width="314" height="28" class="row"/><text x="18" y="502" class="txt xs">☑</text><rect x="42" y="491" width="18" height="10" fill="#5ca8ff66" stroke="#2563eb"/><text x="70" y="502" class="txt xs">public.china_2025_province</text><text x="230" y="502" class="txt tiny green">可编辑</text>
+  <rect x="8" y="512" width="314" height="28" class="row"/><text x="18" y="531" class="txt xs">☐</text><rect x="42" y="520" width="18" height="10" fill="#f59f0066" stroke="#c06a00"/><text x="70" y="531" class="txt xs">public.china_boundaries</text><text x="230" y="531" class="txt tiny warn">只读</text>
+  <rect x="62" y="558" width="188" height="92" class="call"/><text x="72" y="578" class="txt tiny">图层右键菜单</text><text x="72" y="598" class="txt tiny">独显 / 恢复可见性</text><text x="72" y="618" class="txt tiny">缩放到图层</text><text x="72" y="638" class="txt tiny">打开属性表</text>
+
+  <rect x="0" y="680" width="330" height="25" class="dockTitle"/><text x="10" y="697" class="txt title">图层样式</text>
+  <rect x="12" y="720" width="304" height="150" class="pane"/><text x="24" y="746" class="txt xs muted">符号</text><rect x="74" y="730" width="58" height="28" fill="#94d82d66" stroke="#2f9e44"/><text x="148" y="746" class="txt xs">单一符号 · 半透明面</text>
+  <text x="24" y="784" class="txt xs muted">填充</text><rect x="74" y="770" width="46" height="18" fill="#94d82d" stroke="#2f9e44"/><text x="148" y="784" class="txt xs muted">#94D82D / 60%</text>
+  <text x="24" y="822" class="txt xs muted">透明度</text><rect x="84" y="816" width="180" height="4" fill="#cbcbcb"/><rect x="84" y="816" width="112" height="4" fill="#6f8a54"/><rect x="193" y="810" width="8" height="16" fill="#ececec" stroke="#858585"/>
+
+  <path d="M365 742 C500 684 612 736 706 714 C828 686 932 676 1050 714 C1114 735 1165 695 1212 648" class="river"/>
+  <path d="M360 258 L512 322 L638 404 L760 520 L902 662 L1112 812 L1214 846" class="road0"/><path d="M360 258 L512 322 L638 404 L760 520 L902 662 L1112 812 L1214 846" class="road"/>
+  <polygon points="466,206 650,238 618,371 450,340" class="parcel"/><polygon points="676,246 840,270 814,420 650,382" class="parcel2"/><polygon points="520,430 710,445 690,600 485,580" class="parcel"/><polygon points="735,455 930,475 910,625 710,605" class="parcel2"/><polygon points="780,230 1010,260 980,430 760,400" class="sel"/>
+  <circle cx="780" cy="230" r="5.6" class="node"/><circle cx="1010" cy="260" r="5.6" class="node"/><circle cx="980" cy="430" r="5.6" class="node"/><circle cx="760" cy="400" r="5.6" class="node"/>
+  <rect x="348" y="112" width="344" height="96" class="pane"/><rect x="348" y="112" width="344" height="24" class="dockTitle"/><text x="358" y="129" class="txt title">编辑图层: public.china_2025_city</text><text x="360" y="158" class="txt xs muted">选择 / 绘制 / 节点编辑共享同一编辑上下文</text><text x="360" y="182" class="txt xs warn">保存前校验 SRID、几何类型、权限、并发覆盖风险</text>
+  <rect x="1006" y="112" width="214" height="138" class="pane"/><rect x="1006" y="112" width="214" height="24" class="dockTitle"/><text x="1016" y="129" class="txt xs muted">地图总览 / 操作提示</text><rect x="1024" y="150" width="172" height="74" fill="#efeeda" stroke="#b6ad8f"/><rect x="1064" y="174" width="72" height="30" fill="#d7dfc3" stroke="#778866"/><text x="1024" y="244" class="txt tiny muted">滚轮缩放 · Shift+拖框 · 右键上下文菜单</text>
+
+  <rect x="1240" y="94" width="360" height="25" class="dockTitle"/><text x="1250" y="111" class="txt title">图层与要素属性</text>
+  <rect x="1254" y="132" width="330" height="102" class="pane"/><text x="1268" y="156" class="txt title">public.china_2025_city</text><text x="1268" y="180" class="txt xs muted">MultiPolygon · SRID 4326 · primary key: id</text><rect x="1268" y="194" width="68" height="22" class="primary"/><text x="1283" y="210" class="txt xs blue">可编辑</text><rect x="1344" y="194" width="78" height="22" class="btn"/><text x="1355" y="210" class="txt xs">空间索引</text>
+  <rect x="1254" y="254" width="330" height="296" class="pane"/><rect x="1254" y="254" width="330" height="24" class="dockTitle"/><text x="1264" y="271" class="txt title">属性表单</text>
+  <text x="1276" y="306" class="txt xs muted">id</text><rect x="1354" y="292" width="206" height="20" class="input"/><text x="1364" y="307" class="txt xs muted">1024</text>
+  <text x="1276" y="337" class="txt xs muted">name</text><rect x="1354" y="323" width="206" height="20" class="input"/><text x="1364" y="338" class="txt xs">成都市</text>
+  <text x="1276" y="368" class="txt xs muted">adcode</text><rect x="1354" y="354" width="206" height="20" class="input"/><text x="1364" y="369" class="txt xs">510100</text>
+  <text x="1276" y="399" class="txt xs muted">admin_level</text><rect x="1354" y="385" width="206" height="20" class="input"/><text x="1364" y="400" class="txt xs">city</text>
+  <rect x="1264" y="466" width="86" height="28" class="primary"/><text x="1294" y="485" class="txt sm blue">保存</text><rect x="1362" y="466" width="86" height="28" class="btn"/><text x="1391" y="485" class="txt sm">回滚</text><rect x="1460" y="466" width="86" height="28" class="btn"/><text x="1489" y="485" class="txt sm red">删除</text>
+  <rect x="1254" y="574" width="330" height="124" class="pane"/><rect x="1254" y="574" width="330" height="24" class="dockTitle"/><text x="1264" y="591" class="txt title">保存校验</text><text x="1272" y="622" class="txt xs green">✓ SRID 可转换到地图坐标系</text><text x="1272" y="648" class="txt xs green">✓ 几何类型符合 MultiPolygon</text><text x="1272" y="674" class="txt xs warn">⚠ 无 version 字段，保存可能覆盖</text>
+  <rect x="1254" y="720" width="330" height="132" class="pane"/><rect x="1254" y="720" width="330" height="24" class="dockTitle"/><text x="1264" y="737" class="txt title">属性表 / 字段浏览</text><rect x="1268" y="756" width="210" height="22" class="input"/><text x="1278" y="771" class="txt tiny muted">过滤字段 / 类型 / 默认值</text><text x="1494" y="771" class="txt tiny muted">8 个字段</text><text x="1270" y="800" class="txt tiny blue">字段 ▲</text><text x="1346" y="800" class="txt tiny">类型</text><text x="1418" y="800" class="txt tiny">可空</text><text x="1488" y="800" class="txt tiny">可编辑</text><text x="1270" y="824" class="txt tiny">name</text><text x="1346" y="824" class="txt tiny">text</text><text x="1424" y="824" class="txt tiny">否</text><text x="1498" y="824" class="txt tiny">是</text><text x="1270" y="844" class="txt tiny">adcode</text><text x="1346" y="844" class="txt tiny">int4</text><text x="1424" y="844" class="txt tiny">是</text><text x="1498" y="844" class="txt tiny">是</text>
+
+  <rect x="552" y="804" width="500" height="118" class="call"/><text x="572" y="830" class="txt title">操作逻辑主线</text><text x="572" y="856" class="txt xs">1. 连接 PostgreSQL/PostGIS → 扫描 schema/table/geometry/SRID/主键</text><text x="572" y="880" class="txt xs">2. 图层树控制可见性、独显、缩放到图层、打开属性表</text><text x="572" y="904" class="txt xs">3. 地图使用 MVT 浏览，点击要素后回源读取原始 geometry 和属性</text>
+
+  <rect x="0" y="960" width="1600" height="40" class="bar"/>
+  <text x="12" y="984" class="txt xs">坐标 104.0648, 30.6572</text><text x="206" y="984" class="txt xs">比例尺 1:2500</text><text x="326" y="984" class="txt xs">EPSG:3857 显示 / EPSG:4326 数据源</text><text x="602" y="984" class="txt xs green">捕捉: 顶点+线段 8 px</text><text x="780" y="984" class="txt xs warn">事务: 草稿未保存</text><text x="1004" y="984" class="txt xs muted">QGIS 风格: 菜单栏、多排工具栏、停靠面板、图层树、地图画布、属性表、状态栏</text>
+</svg>
