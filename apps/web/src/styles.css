@@ -62,7 +62,7 @@ button {
 }
 
 .focus-ring {
-  outline: none;
+  outline: none !important;
 }
 
 button:disabled,
@@ -73,8 +73,8 @@ select:disabled {
 }
 
 .focus-ring:focus-visible {
-  outline: 1px solid var(--qgis-focus);
-  outline-offset: -1px;
+  outline: 1px solid var(--qgis-focus) !important;
+  outline-offset: -1px !important;
 }
 
 .workbench-panel {
