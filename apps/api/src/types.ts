@@ -72,6 +72,13 @@ export type FeaturePayload = {
   properties?: Record<string, unknown>;
 };
 
+export type FeatureSummary = {
+  type: "Feature";
+  id: string | number | null;
+  geometry: null;
+  properties: Record<string, unknown>;
+};
+
 export function toPoolConfig(config: DatasourceConfig): PoolConfig {
   return {
     host: config.host,

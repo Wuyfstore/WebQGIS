@@ -1,4 +1,4 @@
-import { onBeforeUnmount, shallowRef, watch, type Ref } from "vue";
+import { computed, onBeforeUnmount, shallowRef, watch, type Ref } from "vue";
 import { useConfirmDialog } from "@vueuse/core";
 import OlMap from "ol/Map";
 import MapBrowserEvent from "ol/MapBrowserEvent";
@@ -60,6 +60,16 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const activeTool = shallowRef<MapTool>("select");
   const isDrawing = shallowRef(false);
   const isSnapEnabled = shallowRef(true);
+  const zoomLevel = shallowRef(4);
+  const mapCssVars = computed(() => {
+    const zoom = zoomLevel.value;
+    const gridSize = Math.max(24, Math.min(96, Math.round(96 / Math.max(1, zoom / 4))));
+    const gridOpacity = Math.max(0.28, Math.min(0.82, 0.24 + zoom / 24));
+    return {
+      "--map-grid-size": `${gridSize}px`,
+      "--map-grid-opacity": String(gridOpacity)
+    };
+  });
   const layerMap = new globalThis.Map<string, TileLayer<VectorTileSource>>();
   const { isRevealed: isDeleteDialogOpen, reveal, confirm, cancel } = useConfirmDialog();
 
@@ -67,6 +77,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   let snapInteraction: Snap | null = null;
   let drawInteraction: Draw | null = null;
   let mapClickKey: EventsKey | null = null;
+  let viewChangeKey: EventsKey | null = null;
 
   const editSource = new VectorSource();
   const editLayer = new VectorLayer({
@@ -92,7 +103,12 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       view: new View({
         center: fromLonLat([104.29, 35.5]),
         zoom: 4
-      })
+      }),
+      controls: []
+    });
+    zoomLevel.value = map.value.getView().getZoom() ?? 4;
+    viewChangeKey = map.value.getView().on("change:resolution", () => {
+      zoomLevel.value = map.value?.getView().getZoom() ?? zoomLevel.value;
     });
 
     modifyInteraction = new Modify({ source: editSource });
@@ -110,6 +126,10 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     if (mapClickKey) {
       unByKey(mapClickKey);
       mapClickKey = null;
+    }
+    if (viewChangeKey) {
+      unByKey(viewChangeKey);
+      viewChangeKey = null;
     }
     map.value?.setTarget(undefined);
     map.value = null;
@@ -384,6 +404,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   return {
     map,
+    mapCssVars,
     drawMode,
     activeTool,
     isDrawing,

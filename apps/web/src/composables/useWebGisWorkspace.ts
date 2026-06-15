@@ -5,6 +5,7 @@ import { getEditableFields, getLayerStatus } from "../utils/layer";
 import type {
   Datasource,
   DatasourceForm,
+  FeatureSummary,
   GeoJsonFeature,
   LayerRegistration,
   LayerStylePatch,
@@ -34,12 +35,18 @@ export function useWebGisWorkspace() {
   const selectedFeatureId = shallowRef<string | null>(null);
   const selectedProperties = shallowRef<Record<string, unknown>>({});
   const draftGeometry = shallowRef<unknown>(null);
+  const displayProjection = shallowRef("EPSG:3857");
+  const attributeTableFeatures = shallowRef<FeatureSummary[]>([]);
+  const attributeTableLayerId = shallowRef<string | null>(null);
   const datasourceForm = reactive(defaultDatasourceForm());
 
   const activeLayer = computed(() => layers.value.find((layer) => layer.id === activeLayerId.value));
   const editableFields = computed(() => getEditableFields(activeLayer.value));
   const selectedLayerStatus = computed(() => getLayerStatus(activeLayer.value));
   const visibleLayers = computed(() => layers.value.filter((layer) => visibleLayerIds.value.has(layer.id)));
+  const attributeTableLayer = computed(() => (
+    layers.value.find((layer) => layer.id === attributeTableLayerId.value) ?? null
+  ));
   const canRestoreVisibleLayerIds = computed(() => Boolean(previousVisibleLayerIds.value?.size));
   const registeredLayerCount = computed(() => layers.value.length);
   const editableLayerCount = computed(() => layers.value.filter((layer) => layer.editable).length);
@@ -65,6 +72,11 @@ export function useWebGisWorkspace() {
     selectedFeatureId.value = null;
     selectedProperties.value = {};
     draftGeometry.value = null;
+  }
+
+  function setDisplayProjection(nextProjection: string) {
+    displayProjection.value = nextProjection;
+    setStatus(`当前显示坐标系已切换为 ${nextProjection}`, "success");
   }
 
   async function withBusy<T>(task: () => Promise<T>): Promise<T | undefined> {
@@ -197,6 +209,25 @@ export function useWebGisWorkspace() {
     });
   }
 
+  async function openAttributeTable(layerId: string) {
+    const layer = layers.value.find((item) => item.id === layerId);
+    if (!layer?.queryable) {
+      setStatus("当前图层不可打开属性表", "warning");
+      return;
+    }
+    activeLayerId.value = layer.id;
+    await withBusy(async () => {
+      attributeTableFeatures.value = await apiGet<FeatureSummary[]>(`/api/layers/${layer.id}/features`);
+      attributeTableLayerId.value = layer.id;
+      setStatus(`已打开属性表：${layer.schema}.${layer.table}，读取 ${attributeTableFeatures.value.length} 条属性`, "success");
+    });
+  }
+
+  function closeAttributeTable() {
+    attributeTableLayerId.value = null;
+    attributeTableFeatures.value = [];
+  }
+
   async function saveFeature() {
     const layer = activeLayer.value;
     if (!layer?.editable || !draftGeometry.value) {
@@ -245,8 +276,11 @@ export function useWebGisWorkspace() {
     layers,
     activeLayerId,
     activeLayer,
+    attributeTableLayer,
+    attributeTableFeatures,
     visibleLayerIds,
     visibleLayers,
+    displayProjection,
     canRestoreVisibleLayerIds,
     busy,
     status,
@@ -261,12 +295,15 @@ export function useWebGisWorkspace() {
     refreshAll,
     saveDatasource,
     scanDatasource,
+    setDisplayProjection,
     setActiveLayer,
     toggleLayer,
     showOnlyLayer,
     showAllLayers,
     restorePreviousVisibleLayers,
     readFeature,
+    openAttributeTable,
+    closeAttributeTable,
     saveFeature,
     deleteSelectedFeature,
     updateLayerStyle,

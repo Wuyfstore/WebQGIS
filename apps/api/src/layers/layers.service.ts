@@ -30,6 +30,12 @@ export class LayersService {
     return feature;
   }
 
+  async listFeatures(layerId: string) {
+    const layer = await this.getRequiredLayer(layerId);
+    const datasource = await this.getRequiredDatasource(layer.datasourceId);
+    return this.postgisRepository.listFeatures(datasource, layer);
+  }
+
   async createFeature(layerId: string, payload: FeaturePayload) {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);

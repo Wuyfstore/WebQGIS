@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { Close } from "@element-plus/icons-vue";
-import { useSorted } from "@vueuse/core";
-import { computed, shallowRef } from "vue";
-import type { FieldMeta, LayerRegistration } from "../../types/gis";
+import { useDraggable, useSorted } from "@vueuse/core";
+import { computed, shallowRef, useTemplateRef } from "vue";
+import type { FeatureSummary, FieldMeta, LayerRegistration } from "../../types/gis";
 
 const props = defineProps<{
   layer: LayerRegistration;
+  features: FeatureSummary[];
 }>();
 
 const emit = defineEmits<{
@@ -14,12 +15,27 @@ const emit = defineEmits<{
 
 type FieldSortKey = "name" | "type" | "nullable" | "defaultValue" | "editable";
 type SortDirection = "asc" | "desc";
+type ActiveTab = "records" | "fields";
 
+const panelRef = useTemplateRef<HTMLElement>("panelRef");
+const handleRef = useTemplateRef<HTMLElement>("handleRef");
+const activeTab = shallowRef<ActiveTab>("records");
 const fieldSearch = shallowRef("");
+const recordSearch = shallowRef("");
 const sortKey = shallowRef<FieldSortKey>("name");
 const sortDirection = shallowRef<SortDirection>("asc");
+
+const { style: draggableStyle } = useDraggable(panelRef, {
+  handle: handleRef,
+  initialValue: { x: 420, y: 420 },
+  preventDefault: true
+});
+
 const layerLabel = computed(() => `${props.layer.schema}.${props.layer.table}`);
-const normalizedSearch = computed(() => fieldSearch.value.trim().toLowerCase());
+const normalizedFieldSearch = computed(() => fieldSearch.value.trim().toLowerCase());
+const normalizedRecordSearch = computed(() => recordSearch.value.trim().toLowerCase());
+const propertyFields = computed(() => props.layer.fields.filter((field) => field.name !== props.layer.geometryColumn));
+const displayColumns = computed(() => propertyFields.value.slice(0, 12));
 const extentLabel = computed(() => (
   props.layer.extent
     ? props.layer.extent.map((value) => value.toFixed(4)).join(", ")
@@ -33,7 +49,7 @@ const capabilityItems = computed(() => [
   { label: "空间索引", enabled: props.layer.hasSpatialIndex }
 ]);
 const filteredFields = computed(() => {
-  const query = normalizedSearch.value;
+  const query = normalizedFieldSearch.value;
   if (!query) {
     return props.layer.fields;
   }
@@ -45,13 +61,32 @@ const filteredFields = computed(() => {
     || boolLabel(field.editable).includes(query)
   ));
 });
+const filteredRecords = computed(() => {
+  const query = normalizedRecordSearch.value;
+  if (!query) {
+    return props.features;
+  }
+  return props.features.filter((feature) => {
+    const idLabel = String(feature.id ?? "").toLowerCase();
+    const propertyText = Object.values(feature.properties)
+      .map((value) => valueLabel(value).toLowerCase())
+      .join(" ");
+    return idLabel.includes(query) || propertyText.includes(query);
+  });
+});
 const sortedFields = useSorted(filteredFields, compareFields);
 const fieldCountLabel = computed(() => (
-  normalizedSearch.value
+  normalizedFieldSearch.value
     ? `${sortedFields.value.length}/${props.layer.fields.length} 个字段`
     : `${props.layer.fields.length} 个字段`
 ));
+const recordCountLabel = computed(() => (
+  normalizedRecordSearch.value
+    ? `${filteredRecords.value.length}/${props.features.length} 条记录`
+    : `${props.features.length} 条记录`
+));
 const emptyFieldLabel = computed(() => (props.layer.fields.length === 0 ? "暂无字段" : "无匹配字段"));
+const emptyRecordLabel = computed(() => (props.features.length === 0 ? "暂无属性记录" : "无匹配记录"));
 const sortControls = [
   { key: "name", label: "字段" },
   { key: "type", label: "类型" },
@@ -120,8 +155,14 @@ function typeLabel(field: FieldMeta) {
     : field.dataType;
 }
 
-function valueLabel(value: string | null) {
-  return value ?? "-";
+function valueLabel(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 function boolLabel(value: boolean) {
@@ -130,54 +171,123 @@ function boolLabel(value: boolean) {
 </script>
 
 <template>
-  <div class="attribute-table__backdrop">
-    <section class="attribute-table" role="dialog" aria-modal="true" aria-labelledby="attribute-table-title">
-      <header class="attribute-table__header">
-        <div class="attribute-table__title-group">
-          <h2 id="attribute-table-title" class="attribute-table__title">
-            属性表 - {{ layerLabel }}
-          </h2>
-          <span class="attribute-table__subtitle">{{ fieldCountLabel }}</span>
-        </div>
-        <button class="attribute-table__close focus-ring" type="button" aria-label="关闭属性表" @click="emit('close')">
-          <Close class="attribute-table__close-icon" aria-hidden="true" />
-        </button>
-      </header>
+  <section
+    ref="panelRef"
+    class="attribute-table"
+    :style="draggableStyle"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="attribute-table-title"
+  >
+    <header ref="handleRef" class="attribute-table__header">
+      <div class="attribute-table__title-group">
+        <h2 id="attribute-table-title" class="attribute-table__title">
+          属性表 - {{ layerLabel }}
+        </h2>
+        <span class="attribute-table__subtitle">{{ recordCountLabel }} · {{ fieldCountLabel }}</span>
+      </div>
+      <button class="attribute-table__close focus-ring" type="button" aria-label="关闭属性表" @click="emit('close')">
+        <Close class="attribute-table__close-icon" aria-hidden="true" />
+      </button>
+    </header>
 
-      <section class="attribute-table__meta" aria-label="图层元信息">
-        <div class="attribute-table__meta-item">
-          <span class="attribute-table__meta-label">几何</span>
-          <strong class="attribute-table__meta-value">{{ layer.geometryType }}</strong>
-        </div>
-        <div class="attribute-table__meta-item">
-          <span class="attribute-table__meta-label">几何字段</span>
-          <strong class="attribute-table__meta-value">{{ layer.geometryColumn }}</strong>
-        </div>
-        <div class="attribute-table__meta-item">
-          <span class="attribute-table__meta-label">SRID</span>
-          <strong class="attribute-table__meta-value">{{ layer.srid ?? "-" }}</strong>
-        </div>
-        <div class="attribute-table__meta-item">
-          <span class="attribute-table__meta-label">主键</span>
-          <strong class="attribute-table__meta-value">{{ layer.primaryKey ?? "-" }}</strong>
-        </div>
-        <div class="attribute-table__meta-item attribute-table__meta-item--wide">
-          <span class="attribute-table__meta-label">范围</span>
-          <strong class="attribute-table__meta-value">{{ extentLabel }}</strong>
-        </div>
+    <section class="attribute-table__meta" aria-label="图层元信息">
+      <div class="attribute-table__meta-item">
+        <span class="attribute-table__meta-label">几何</span>
+        <strong class="attribute-table__meta-value">{{ layer.geometryType }}</strong>
+      </div>
+      <div class="attribute-table__meta-item">
+        <span class="attribute-table__meta-label">几何字段</span>
+        <strong class="attribute-table__meta-value">{{ layer.geometryColumn }}</strong>
+      </div>
+      <div class="attribute-table__meta-item">
+        <span class="attribute-table__meta-label">SRID</span>
+        <strong class="attribute-table__meta-value">{{ layer.srid ?? "-" }}</strong>
+      </div>
+      <div class="attribute-table__meta-item">
+        <span class="attribute-table__meta-label">主键</span>
+        <strong class="attribute-table__meta-value">{{ layer.primaryKey ?? "-" }}</strong>
+      </div>
+      <div class="attribute-table__meta-item attribute-table__meta-item--wide">
+        <span class="attribute-table__meta-label">范围</span>
+        <strong class="attribute-table__meta-value">{{ extentLabel }}</strong>
+      </div>
+    </section>
+
+    <section class="attribute-table__capabilities" aria-label="图层能力">
+      <span
+        v-for="item in capabilityItems"
+        :key="item.label"
+        class="attribute-table__capability"
+        :class="{ 'attribute-table__capability--enabled': item.enabled }"
+      >
+        {{ item.label }}: {{ boolLabel(item.enabled) }}
+      </span>
+    </section>
+
+    <div class="attribute-table__tabs" role="tablist" aria-label="属性表视图">
+      <button
+        class="attribute-table__tab focus-ring"
+        :class="{ 'attribute-table__tab--active': activeTab === 'records' }"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === 'records'"
+        @click="activeTab = 'records'"
+      >
+        属性数据
+      </button>
+      <button
+        class="attribute-table__tab focus-ring"
+        :class="{ 'attribute-table__tab--active': activeTab === 'fields' }"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === 'fields'"
+        @click="activeTab = 'fields'"
+      >
+        字段结构
+      </button>
+    </div>
+
+    <template v-if="activeTab === 'records'">
+      <section class="attribute-table__controls" aria-label="属性记录浏览">
+        <label class="attribute-table__filter">
+          <span class="attribute-table__filter-label">记录过滤</span>
+          <input
+            v-model="recordSearch"
+            class="attribute-table__filter-input focus-ring"
+            type="search"
+            aria-label="过滤属性记录"
+            placeholder="主键 / 属性值"
+          />
+        </label>
       </section>
 
-      <section class="attribute-table__capabilities" aria-label="图层能力">
-        <span
-          v-for="item in capabilityItems"
-          :key="item.label"
-          class="attribute-table__capability"
-          :class="{ 'attribute-table__capability--enabled': item.enabled }"
-        >
-          {{ item.label }}: {{ boolLabel(item.enabled) }}
-        </span>
-      </section>
+      <div class="attribute-table__table-wrap">
+        <table class="attribute-table__table">
+          <thead>
+            <tr>
+              <th class="attribute-table__id-col" scope="col">{{ layer.primaryKey ?? "id" }}</th>
+              <th v-for="field in displayColumns" :key="field.name" scope="col">{{ field.name }}</th>
+            </tr>
+          </thead>
+          <tbody v-if="filteredRecords.length > 0">
+            <tr v-for="feature in filteredRecords" :key="String(feature.id ?? JSON.stringify(feature.properties))">
+              <th scope="row">{{ valueLabel(feature.id) }}</th>
+              <td v-for="field in displayColumns" :key="field.name">
+                {{ valueLabel(feature.properties[field.name]) }}
+              </td>
+            </tr>
+          </tbody>
+          <tbody v-else>
+            <tr>
+              <td class="attribute-table__empty" :colspan="displayColumns.length + 1">{{ emptyRecordLabel }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
+    <template v-else>
       <section class="attribute-table__controls" aria-label="字段浏览">
         <label class="attribute-table__filter">
           <span class="attribute-table__filter-label">字段过滤</span>
@@ -224,24 +334,16 @@ function boolLabel(value: boolean) {
           </tbody>
         </table>
       </div>
-    </section>
-  </div>
+    </template>
+  </section>
 </template>
 
 <style scoped>
-.attribute-table__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 28;
-  display: grid;
-  align-items: end;
-  padding: 32px;
-  background: rgba(15, 23, 42, 0.24);
-}
-
 .attribute-table {
-  width: min(960px, 100%);
-  max-height: min(560px, calc(100vh - 64px));
+  position: fixed;
+  z-index: 28;
+  width: min(1080px, calc(100vw - 32px));
+  max-height: min(580px, calc(100vh - 32px));
   border: 1px solid #8d8d8d;
   background: var(--qgis-pane);
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.28);
@@ -250,12 +352,14 @@ function boolLabel(value: boolean) {
 
 .attribute-table__header {
   display: flex;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #a5a5a5;
   background: var(--qgis-dock-title);
+  cursor: move;
   padding: 0 8px 0 12px;
+  user-select: none;
 }
 
 .attribute-table__title-group {
@@ -287,6 +391,7 @@ function boolLabel(value: boolean) {
   background: #e8e8e8;
   color: var(--qgis-text);
   padding: 0;
+  cursor: pointer;
 }
 
 .attribute-table__close-icon {
@@ -337,7 +442,7 @@ function boolLabel(value: boolean) {
   flex-wrap: wrap;
   gap: 6px;
   border-bottom: 1px solid #c8c8c8;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: #eeeeee;
 }
 
@@ -353,6 +458,32 @@ function boolLabel(value: boolean) {
   border-color: #9bb88c;
   background: #eef6e8;
   color: var(--qgis-green);
+}
+
+.attribute-table__tabs {
+  display: flex;
+  border-bottom: 1px solid #b8b8b8;
+  background: #eeeeee;
+  padding: 4px 8px 0;
+}
+
+.attribute-table__tab {
+  min-height: 25px;
+  border: 1px solid #9a9a9a;
+  border-bottom: 0;
+  background: #e6e6e6;
+  color: var(--qgis-muted);
+  padding: 4px 14px;
+  font-size: 12px;
+}
+
+.attribute-table__tab + .attribute-table__tab {
+  margin-left: 4px;
+}
+
+.attribute-table__tab--active {
+  background: var(--qgis-pane);
+  color: var(--qgis-text);
 }
 
 .attribute-table__controls {
@@ -386,13 +517,13 @@ function boolLabel(value: boolean) {
 }
 
 .attribute-table__table-wrap {
-  max-height: 310px;
+  max-height: 300px;
   overflow: auto;
   background: #ffffff;
 }
 
 .attribute-table__table {
-  width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
   color: var(--qgis-text);
@@ -401,6 +532,7 @@ function boolLabel(value: boolean) {
 
 .attribute-table__table th,
 .attribute-table__table td {
+  min-width: 120px;
   border: 1px solid #d2d2d2;
   padding: 5px 8px;
   text-align: left;
@@ -409,12 +541,18 @@ function boolLabel(value: boolean) {
   white-space: nowrap;
 }
 
+.attribute-table__table .attribute-table__id-col,
+.attribute-table__table tbody th {
+  min-width: 90px;
+}
+
 .attribute-table__table thead th {
   position: sticky;
   top: 0;
   background: #e6e6e6;
   font-weight: 600;
   padding: 0;
+  z-index: 1;
 }
 
 .attribute-table__table tbody th {
@@ -453,13 +591,8 @@ function boolLabel(value: boolean) {
 }
 
 @media (max-width: 760px) {
-  .attribute-table__backdrop {
-    align-items: stretch;
-    padding: 12px;
-  }
-
   .attribute-table {
-    max-height: calc(100vh - 24px);
+    width: calc(100vw - 24px);
   }
 
   .attribute-table__meta {

@@ -114,6 +114,10 @@ const editorMock = {
   isDrawing: shallowRef(false),
   isSnapEnabled: shallowRef(true),
   isDeleteDialogOpen: shallowRef(false),
+  mapCssVars: shallowRef({
+    "--map-grid-size": "64px",
+    "--map-grid-opacity": "0.42"
+  }),
   initializeMap: vi.fn(),
   loadEditableFeature: vi.fn(),
   clearDraft: vi.fn(),
@@ -140,6 +144,30 @@ vi.mock("../../api", () => ({
     }
     if (path === "/api/layers") {
       return sampleLayers;
+    }
+    if (path === "/api/layers/city/features") {
+      return [
+        {
+          type: "Feature",
+          id: 1024,
+          geometry: null,
+          properties: {
+            id: 1024,
+            name: "成都市",
+            adcode: 510100
+          }
+        },
+        {
+          type: "Feature",
+          id: 1025,
+          geometry: null,
+          properties: {
+            id: 1025,
+            name: "绵阳市",
+            adcode: 510700
+          }
+        }
+      ];
     }
     throw new Error(`Unhandled apiGet ${path}`);
   }),
@@ -251,21 +279,6 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.toggleSnap).toHaveBeenCalled();
   });
 
-  it("shows only one layer from the layer panel solo action", async () => {
-    const wrapper = mount(WebGisWorkbench);
-    await flushPromises();
-
-    const soloButtons = wrapper.findAll(".layer-panel__solo");
-    expect(soloButtons).toHaveLength(2);
-
-    await soloButtons[1].trigger("click");
-
-    const visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
-    expect(visibilityInputs[0].element.checked).toBe(false);
-    expect(visibilityInputs[1].element.checked).toBe(true);
-    expect(wrapper.text()).toContain("已仅显示图层：public.china_2025_city");
-  });
-
   it("can show only the active layer and then show all layers from the layer menu", async () => {
     const wrapper = mount(WebGisWorkbench);
     await flushPromises();
@@ -295,7 +308,9 @@ describe("WebGisWorkbench", () => {
   });
 
   it("restores previous layer visibility after using solo mode", async () => {
-    const wrapper = mount(WebGisWorkbench);
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
     await flushPromises();
 
     const visibilityInputs = () => wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
@@ -303,7 +318,13 @@ describe("WebGisWorkbench", () => {
     expect(visibilityInputs()[0].element.checked).toBe(true);
     expect(visibilityInputs()[1].element.checked).toBe(false);
 
-    await wrapper.findAll(".layer-panel__solo")[1].trigger("click");
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[0].click();
+    await flushPromises();
+
     expect(visibilityInputs()[0].element.checked).toBe(false);
     expect(visibilityInputs()[1].element.checked).toBe(true);
 
@@ -319,6 +340,9 @@ describe("WebGisWorkbench", () => {
     expect(visibilityInputs()[0].element.checked).toBe(true);
     expect(visibilityInputs()[1].element.checked).toBe(false);
     expect(wrapper.text()).toContain("已恢复 1 个图层的可见性");
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
   });
 
   it("opens layer context menu and runs layer commands", async () => {
@@ -372,6 +396,23 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.text()).toContain("已打开属性表：public.china_2025_city");
     expect(document.body.textContent).toContain("属性表 - public.china_2025_city");
+    expect(document.body.textContent).toContain("2 条记录");
+    expect(document.body.textContent).toContain("成都市");
+    expect(document.body.textContent).toContain("绵阳市");
+    expect(document.querySelector(".attribute-table__header")).not.toBeNull();
+
+    const recordFilter = document.querySelector<HTMLInputElement>(".attribute-table__filter-input");
+    expect(recordFilter).not.toBeNull();
+    recordFilter!.value = "绵阳";
+    recordFilter!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("1/2 条记录");
+    expect(document.body.textContent).toContain("绵阳市");
+
+    await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[1].click();
+    await flushPromises();
+
     expect(document.body.textContent).toContain("3 个字段");
     expect(document.body.textContent).toContain("adcode");
 

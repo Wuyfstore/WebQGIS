@@ -9,6 +9,7 @@ const props = defineProps<{
   hasDraftGeometry: boolean;
   hasSelectedFeature: boolean;
   isDrawing: boolean;
+  mapStyle?: Record<string, string>;
 }>();
 
 const drawMode = defineModel<GeometryMode>("drawMode", { required: true });
@@ -33,7 +34,7 @@ onMounted(() => {
 
 <template>
   <section class="map-canvas">
-    <div ref="mapRoot" class="map-canvas__map" aria-label="地图画布"></div>
+    <div ref="mapRoot" class="map-canvas__map" :style="mapStyle" aria-label="地图画布"></div>
 
     <div class="map-canvas__toolbar" aria-label="编辑工具栏">
       <div class="map-canvas__toolbar-title">
@@ -92,17 +93,22 @@ onMounted(() => {
   min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--qgis-border);
-  background:
-    linear-gradient(var(--qgis-map-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--qgis-map-grid) 1px, transparent 1px),
-    var(--qgis-map-bg);
-  background-size: 64px 64px;
+  background: var(--qgis-map-bg);
 }
 
 .map-canvas__map {
   width: 100%;
   height: 100%;
   min-height: calc(100vh - 134px);
+  background:
+    linear-gradient(rgba(215, 208, 185, var(--map-grid-opacity, 0.42)) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(215, 208, 185, var(--map-grid-opacity, 0.42)) 1px, transparent 1px);
+  background-size: var(--map-grid-size, 64px) var(--map-grid-size, 64px);
+}
+
+.map-canvas__map :deep(.ol-zoom),
+.map-canvas__map :deep(.ol-control) {
+  display: none;
 }
 
 .map-canvas__toolbar {

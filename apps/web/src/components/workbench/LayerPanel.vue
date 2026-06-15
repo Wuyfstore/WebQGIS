@@ -110,16 +110,6 @@ onBeforeUnmount(() => {
             <span class="layer-panel__name">{{ layer.schema }}.{{ layer.table }}</span>
           </button>
 
-          <button
-            class="layer-panel__solo focus-ring"
-            type="button"
-            :aria-label="`仅显示 ${layer.schema}.${layer.table}`"
-            :title="`仅显示 ${layer.schema}.${layer.table}`"
-            @click="emit('solo', layer.id)"
-          >
-            独显
-          </button>
-
           <span class="layer-panel__tag" :class="{ 'layer-panel__tag--readonly': !layer.editable }">
             {{ layer.editable ? "可编辑" : "只读" }}
           </span>
@@ -279,7 +269,7 @@ onBeforeUnmount(() => {
 
 .layer-panel__row {
   display: grid;
-  grid-template-columns: 22px 24px minmax(0, 1fr) 44px 76px;
+  grid-template-columns: 22px 24px minmax(0, 1fr) 76px;
   align-items: center;
   min-height: 28px;
   border: 1px solid #d0d0d0;
@@ -317,38 +307,25 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
-.layer-panel__solo {
-  min-width: 38px;
-  min-height: 22px;
-  border: 1px solid #9aa7b1;
-  background: #eef3f7;
-  color: #285f8f;
-  padding: 0 6px;
-  font-size: 11px;
-}
-
-.layer-panel__solo:hover {
-  background: var(--qgis-blue-soft);
-}
-
 .layer-panel__context-menu {
   position: fixed;
   z-index: 40;
-  width: 200px;
+  width: 172px;
   border: 1px solid #8d8d8d;
   background: #f7f7f7;
   box-shadow: 2px 4px 12px rgba(15, 23, 42, 0.24);
-  padding: 4px;
+  padding: 3px;
+  font-size: 11px;
 }
 
 .layer-panel__context-item {
   display: block;
   width: 100%;
-  min-height: 26px;
+  min-height: 22px;
   border: 0;
   background: transparent;
   color: var(--qgis-text);
-  padding: 4px 10px;
+  padding: 3px 8px;
   text-align: left;
 }
 

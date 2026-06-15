@@ -31,7 +31,6 @@ const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
-const attributeTableLayerId = shallowRef<string | null>(null);
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -50,7 +49,10 @@ const {
   layers,
   activeLayerId,
   activeLayer,
+  attributeTableLayer,
+  attributeTableFeatures,
   visibleLayerIds,
+  displayProjection,
   canRestoreVisibleLayerIds,
   busy,
   status,
@@ -66,7 +68,8 @@ const {
   activeTool,
   isDrawing,
   isSnapEnabled,
-  isDeleteDialogOpen
+  isDeleteDialogOpen,
+  mapCssVars
 } = editor;
 
 const hasDraftGeometry = computed(() => Boolean(workspace.draftGeometry.value));
@@ -80,10 +83,8 @@ const activeLayerLabel = computed(() => (
   activeLayer.value ? `${activeLayer.value.schema}.${activeLayer.value.table}` : "未选择"
 ));
 const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
-const attributeTableLayer = computed(() => (
-  layers.value.find((layer) => layer.id === attributeTableLayerId.value) ?? null
-));
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
+const projectionOptions = ["EPSG:3857", "EPSG:4326", "EPSG:4490", "EPSG:4547"] as const;
 const menuItems = [
   "项目",
   "编辑",
@@ -384,24 +385,17 @@ function restorePreviousVisibleLayers() {
   workspace.restorePreviousVisibleLayers();
 }
 
-function findLayerLabel(layerId: string) {
-  const layer = layers.value.find((item) => item.id === layerId);
-  return layer ? `${layer.schema}.${layer.table}` : "未知图层";
-}
-
 function zoomToLayer(layerId: string) {
   workspace.setActiveLayer(layerId);
   editor.zoomToLayerExtent(layerId);
 }
 
 function openAttributeTable(layerId: string) {
-  workspace.setActiveLayer(layerId);
-  attributeTableLayerId.value = layerId;
-  workspace.setStatus(`已打开属性表：${findLayerLabel(layerId)}`, "success");
+  void workspace.openAttributeTable(layerId);
 }
 
 function closeAttributeTable() {
-  attributeTableLayerId.value = null;
+  workspace.closeAttributeTable();
 }
 
 function validateActiveLayer() {
@@ -479,6 +473,17 @@ function validateActiveLayer() {
       <span class="workbench__context-badge">{{ activeLayerEditStatus }}</span>
       <span class="workbench__context-label">捕捉:</span>
       <span class="workbench__context-field">顶点 + 线段, 8 px</span>
+      <span class="workbench__context-label">显示坐标系:</span>
+      <select
+        class="workbench__context-select focus-ring"
+        :value="displayProjection"
+        aria-label="当前项目显示坐标系"
+        @change="workspace.setDisplayProjection(($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="projection in projectionOptions" :key="projection" :value="projection">
+          {{ projection }}
+        </option>
+      </select>
       <span class="workbench__context-note">显示链路: MVT</span>
       <span class="workbench__context-note">编辑链路: 原始 PostGIS geometry</span>
     </section>
@@ -517,6 +522,7 @@ function validateActiveLayer() {
         :has-draft-geometry="hasDraftGeometry"
         :has-selected-feature="hasSelectedFeature"
         :is-drawing="isDrawing"
+        :map-style="mapCssVars"
         @ready="handleMapReady"
         @draw="startDrawing"
         @save="handleSaveFeature"
@@ -536,7 +542,7 @@ function validateActiveLayer() {
     <footer class="workbench__statusbar">
       <span>坐标 104.0648, 30.6572</span>
       <span>比例尺 1:2500</span>
-      <span>EPSG:3857 显示 / EPSG:4326 数据源</span>
+      <span>{{ displayProjection }} 显示 / EPSG:4326 数据源</span>
       <span class="workbench__statusbar-ok">捕捉: 顶点+线段 8 px</span>
       <span :class="statusClasses" class="workbench__status" role="status">{{ status.text }}</span>
     </footer>
@@ -561,6 +567,7 @@ function validateActiveLayer() {
     <AttributeTablePanel
       v-if="attributeTableLayer"
       :layer="attributeTableLayer"
+      :features="attributeTableFeatures"
       @close="closeAttributeTable"
     />
   </main>
@@ -749,6 +756,15 @@ function validateActiveLayer() {
   border: 1px solid #aeb6bf;
   background: #ffffff;
   padding: 2px 8px;
+}
+
+.workbench__context-select {
+  min-width: 108px;
+  min-height: 22px;
+  border: 1px solid #aeb6bf;
+  background: #ffffff;
+  color: var(--qgis-text);
+  padding: 2px 6px;
 }
 
 .workbench__context-badge {

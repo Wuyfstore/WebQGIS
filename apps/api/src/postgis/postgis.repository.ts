@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import type {
   DatasourceConfig,
   FeaturePayload,
+  FeatureSummary,
   FieldMeta,
   GeometryKind,
   LayerRegistration
@@ -175,6 +176,30 @@ export class PostgisRepository implements OnApplicationShutdown {
       [layer.geometryColumn, layer.primaryKey, pk]
     );
     return result.rows[0]?.feature ?? null;
+  }
+
+  async listFeatures(
+    config: DatasourceConfig,
+    layer: LayerRegistration,
+    limit = 100
+  ): Promise<FeatureSummary[]> {
+    this.assertQueryableLayer(layer);
+    const pool = this.getPool(config);
+    const result = await pool.query<{ feature: FeatureSummary }>(
+      `
+      select jsonb_build_object(
+        'type', 'Feature',
+        'id', ${quoteIdent(layer.primaryKey!)},
+        'geometry', null,
+        'properties', to_jsonb(t) - $1
+      ) as feature
+      from ${qualifiedTable(layer)} t
+      order by ${quoteIdent(layer.primaryKey!)}::text
+      limit $2
+      `,
+      [layer.geometryColumn, limit]
+    );
+    return result.rows.map((row) => row.feature);
   }
 
   async createFeature(

@@ -18,6 +18,11 @@ export class LayersController {
     return this.layersService.list();
   }
 
+  @Get(":id/features")
+  listFeatures(@Param() params: LayerParamDto) {
+    return this.layersService.listFeatures(params.id);
+  }
+
   @Get(":id/features/:pk")
   readFeature(@Param() params: FeatureParamDto) {
     return this.layersService.readFeature(params.id, params.pk);

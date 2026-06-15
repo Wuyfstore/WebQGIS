@@ -7,6 +7,13 @@ export type GeoJsonFeature = {
   properties?: Record<string, unknown> | null;
 };
 
+export type FeatureSummary = {
+  type: "Feature";
+  id: string | number | null;
+  geometry: null;
+  properties: Record<string, unknown>;
+};
+
 export type FieldMeta = {
   name: string;
   dataType: string;
