@@ -2,7 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shallowRef } from "vue";
 import WebGisWorkbench from "./WebGisWorkbench.vue";
-import { apiGet } from "../../api";
+import { apiGet, apiSend } from "../../api";
 import type { Datasource, LayerRegistration } from "../../types/gis";
 
 const sampleDatasources: Datasource[] = [];
@@ -178,7 +178,18 @@ vi.mock("../../api", () => ({
     }
     throw new Error(`Unhandled apiGet ${path}`);
   }),
-  apiSend: vi.fn()
+  apiSend: vi.fn(async (path: string, method: string, payload?: unknown) => {
+    if (path === "/api/layers/city/style" && method === "PUT") {
+      return {
+        ...sampleLayers[1],
+        style: {
+          ...sampleLayers[1].style,
+          ...(payload as object)
+        }
+      };
+    }
+    throw new Error(`Unhandled apiSend ${method} ${path}`);
+  })
 }));
 
 describe("WebGisWorkbench", () => {
@@ -427,6 +438,9 @@ describe("WebGisWorkbench", () => {
     expect(document.body.textContent).toContain("独显图层");
     expect(document.body.textContent).toContain("缩放到图层");
     expect(document.body.textContent).toContain("打开属性表");
+    expect(document.body.textContent).toContain("图层样式");
+    expect(document.querySelector(".workbench__style-dialog")).toBeNull();
+    expect(wrapper.find(".layer-panel__style-card").exists()).toBe(false);
 
     await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[0].click();
     await flushPromises();
@@ -554,6 +568,32 @@ describe("WebGisWorkbench", () => {
     await flushPromises();
 
     expect(document.body.textContent).not.toContain("属性表 - public.china_2025_city");
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[4].click();
+    await flushPromises();
+
+    const styleDialog = document.querySelector<HTMLElement>(".workbench__style-dialog");
+    expect(styleDialog).not.toBeNull();
+    expect(styleDialog?.textContent).toContain("图层样式");
+    expect(styleDialog?.textContent).toContain("public.china_2025_city");
+    expect(styleDialog?.textContent).toContain("MultiPolygon · 60%");
+
+    const fillInput = document.querySelector<HTMLInputElement>(".workbench__style-swatch");
+    expect(fillInput).not.toBeNull();
+    fillInput!.value = "#123456";
+    fillInput!.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(vi.mocked(apiSend)).toHaveBeenCalledWith("/api/layers/city/style", "PUT", { fill: "#123456" });
+    expect(document.body.textContent).toContain("已更新图层样式：public.china_2025_city");
+
+    await document.querySelector<HTMLButtonElement>(".workbench__dialog-button")?.click();
+    await flushPromises();
+    expect(document.querySelector(".workbench__style-dialog")).toBeNull();
 
     wrapper.unmount();
     document.body.innerHTML = "";

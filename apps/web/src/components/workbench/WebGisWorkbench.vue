@@ -24,7 +24,7 @@ import MapCanvas from "./MapCanvas.vue";
 import EditInspector from "./EditInspector.vue";
 import { useOpenLayersEditor } from "../../composables/useOpenLayersEditor";
 import { useWebGisWorkspace } from "../../composables/useWebGisWorkspace";
-import type { GeometryMode } from "../../types/gis";
+import type { GeometryMode, LayerStylePatch } from "../../types/gis";
 import { getGeometryModes } from "../../utils/layer";
 
 const workspace = useWebGisWorkspace();
@@ -32,6 +32,7 @@ const mapElement = shallowRef<HTMLDivElement | null>(null);
 const menuRef = useTemplateRef<HTMLElement>("menuRef");
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
+const styleEditorLayerId = shallowRef<string | null>(null);
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -89,6 +90,9 @@ const statusClasses = computed(() => ({
 }));
 const activeLayerLabel = computed(() => (
   activeLayer.value ? `${activeLayer.value.schema}.${activeLayer.value.table}` : "未选择"
+));
+const styleEditorLayer = computed(() => (
+  layers.value.find((layer) => layer.id === styleEditorLayerId.value) ?? null
 ));
 const activeLayerEditStatus = computed(() => (activeLayer.value?.editable ? "开启" : "只读"));
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
@@ -430,6 +434,27 @@ function closeAttributeTable() {
   workspace.closeAttributeTable();
 }
 
+function openStyleEditor(layerId: string) {
+  workspace.setActiveLayer(layerId);
+  styleEditorLayerId.value = layerId;
+}
+
+function closeStyleEditor() {
+  styleEditorLayerId.value = null;
+}
+
+function readStyleNumber(event: Event): number {
+  return Number((event.target as HTMLInputElement).value);
+}
+
+function updateStyleEditorLayer(patch: LayerStylePatch) {
+  const layer = styleEditorLayer.value;
+  if (!layer) {
+    return;
+  }
+  void workspace.updateLayerStyle(layer.id, patch);
+}
+
 function validateActiveLayer() {
   const layer = activeLayer.value;
   if (!layer) {
@@ -543,7 +568,7 @@ function validateActiveLayer() {
           @restore-visibility="workspace.restorePreviousVisibleLayers"
           @zoom-to-layer="zoomToLayer"
           @open-attribute-table="openAttributeTable"
-          @update-style="workspace.updateLayerStyle"
+          @open-style-editor="openStyleEditor"
         />
       </aside>
 
@@ -593,6 +618,86 @@ function validateActiveLayer() {
             </button>
             <button class="workbench__dialog-button workbench__dialog-button--danger focus-ring" type="button" @click="editor.confirmDelete">
               删除
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="styleEditorLayer" class="workbench__dialog-backdrop" @pointerdown.self="closeStyleEditor">
+        <section class="workbench__style-dialog" role="dialog" aria-modal="true" aria-labelledby="style-editor-title">
+          <header class="workbench__style-dialog-header">
+            <div>
+              <h2 id="style-editor-title" class="workbench__dialog-title">图层样式</h2>
+              <p class="workbench__style-dialog-subtitle">{{ styleEditorLayer.schema }}.{{ styleEditorLayer.table }}</p>
+            </div>
+            <button class="workbench__style-dialog-close focus-ring" type="button" aria-label="关闭图层样式" @click="closeStyleEditor">
+              ×
+            </button>
+          </header>
+
+          <div class="workbench__style-preview">
+            <span class="workbench__style-preview-swatch" :style="{ backgroundColor: styleEditorLayer.style.fill.slice(0, 7), borderColor: styleEditorLayer.style.stroke }"></span>
+            <div>
+              <strong>单一符号 · 半透明面</strong>
+              <span>{{ styleEditorLayer.geometryType }} · {{ Math.round(styleEditorLayer.style.opacity * 100) }}%</span>
+            </div>
+          </div>
+
+          <label class="workbench__style-field">
+            <span class="workbench__style-label">填充</span>
+            <input
+              class="workbench__style-swatch focus-ring"
+              type="color"
+              :value="styleEditorLayer.style.fill.slice(0, 7)"
+              @change="updateStyleEditorLayer({ fill: ($event.target as HTMLInputElement).value })"
+            />
+            <span class="workbench__style-value">{{ styleEditorLayer.style.fill.slice(0, 7) }}</span>
+          </label>
+
+          <label class="workbench__style-field">
+            <span class="workbench__style-label">边线</span>
+            <input
+              class="workbench__style-swatch focus-ring"
+              type="color"
+              :value="styleEditorLayer.style.stroke"
+              @change="updateStyleEditorLayer({ stroke: ($event.target as HTMLInputElement).value })"
+            />
+            <span class="workbench__style-value">{{ styleEditorLayer.style.stroke }}</span>
+          </label>
+
+          <label class="workbench__style-field workbench__style-field--range">
+            <span class="workbench__style-label">透明度</span>
+            <input
+              class="workbench__style-slider focus-ring"
+              type="range"
+              min="0.05"
+              max="1"
+              step="0.05"
+              :value="styleEditorLayer.style.opacity"
+              @change="updateStyleEditorLayer({ opacity: readStyleNumber($event) })"
+            />
+            <span class="workbench__style-value">{{ Math.round(styleEditorLayer.style.opacity * 100) }}%</span>
+          </label>
+
+          <label class="workbench__style-field workbench__style-field--range">
+            <span class="workbench__style-label">线宽</span>
+            <input
+              class="workbench__style-slider focus-ring"
+              type="range"
+              min="0.5"
+              max="8"
+              step="0.5"
+              :value="styleEditorLayer.style.strokeWidth"
+              @change="updateStyleEditorLayer({ strokeWidth: readStyleNumber($event) })"
+            />
+            <span class="workbench__style-value">{{ styleEditorLayer.style.strokeWidth }} px</span>
+          </label>
+
+          <div class="workbench__dialog-actions">
+            <button class="workbench__dialog-button focus-ring" type="button" @click="closeStyleEditor">
+              关闭
             </button>
           </div>
         </section>
@@ -883,6 +988,40 @@ function validateActiveLayer() {
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
 }
 
+.workbench__style-dialog {
+  display: grid;
+  width: min(440px, 100%);
+  gap: 12px;
+  border: 1px solid var(--qgis-border);
+  padding: 14px;
+  background: var(--qgis-pane);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.workbench__style-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--qgis-border-soft);
+  padding-bottom: 10px;
+}
+
+.workbench__style-dialog-subtitle {
+  margin: 4px 0 0;
+  color: var(--qgis-muted);
+}
+
+.workbench__style-dialog-close {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #8d8d8d;
+  background: #e8e8e8;
+  color: var(--qgis-text);
+  padding: 0;
+  line-height: 20px;
+}
+
 .workbench__dialog-title {
   margin: 0 0 8px;
   color: var(--qgis-text);
@@ -917,6 +1056,62 @@ function validateActiveLayer() {
   color: var(--qgis-danger);
 }
 
+.workbench__style-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #b7b7b7;
+  background: var(--qgis-row);
+  padding: 8px;
+}
+
+.workbench__style-preview strong,
+.workbench__style-preview span {
+  display: block;
+}
+
+.workbench__style-preview span {
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.workbench__style-preview-swatch {
+  width: 58px;
+  height: 28px;
+  border: 1px solid;
+}
+
+.workbench__style-field {
+  display: grid;
+  grid-template-columns: 54px 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.workbench__style-field--range {
+  grid-template-columns: 54px minmax(0, 1fr) 46px;
+}
+
+.workbench__style-label,
+.workbench__style-value {
+  color: var(--qgis-muted);
+  font-size: 12px;
+}
+
+.workbench__style-swatch {
+  width: 46px;
+  height: 22px;
+  border: 1px solid #8f8f8f;
+  padding: 2px;
+  background: var(--qgis-input);
+}
+
+.workbench__style-slider {
+  width: 100%;
+  min-width: 0;
+  accent-color: #6f8a54;
+}
+
 @media (max-width: 1100px) {
   .workbench__body {
     grid-template-columns: 300px minmax(520px, 1fr);
@@ -935,6 +1130,15 @@ function validateActiveLayer() {
 
   .workbench__body {
     grid-template-columns: 1fr;
+  }
+
+  .workbench__style-field,
+  .workbench__style-field--range {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .workbench__style-value {
+    grid-column: 2;
   }
 
   .workbench__contextbar,
