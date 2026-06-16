@@ -8,6 +8,8 @@ import type {
   AttributeTableQuery,
   AttributeCalculationPayload,
   AttributeCalculationResult,
+  CrsDefinition,
+  CustomCrsPayload,
   FeaturePage,
   FeatureSummary,
   GeoJsonFeature,
@@ -42,6 +44,8 @@ export function useWebGisWorkspace() {
   const selectedProperties = shallowRef<Record<string, unknown>>({});
   const draftGeometry = shallowRef<unknown>(null);
   const displayProjection = shallowRef("EPSG:3857");
+  const crsCatalog = shallowRef<CrsDefinition[]>([]);
+  const customCrsCatalog = shallowRef<CrsDefinition[]>([]);
   const attributeTableFeatures = shallowRef<FeatureSummary[]>([]);
   const attributeTableTotal = shallowRef(0);
   const attributeSqlResult = shallowRef<SqlQueryResult | null>(null);
@@ -111,6 +115,43 @@ export function useWebGisWorkspace() {
     setStatus(`当前显示坐标系已切换为 ${nextProjection}`, "success");
   }
 
+  async function searchCrsCatalog(search = "") {
+    const params = new URLSearchParams({
+      q: search,
+      limit: "40"
+    });
+    const items = await apiGet<CrsDefinition[]>(`/api/crs/search?${params.toString()}`);
+    crsCatalog.value = items;
+    return items;
+  }
+
+  async function refreshCustomCrsCatalog() {
+    const items = await apiGet<CrsDefinition[]>("/api/crs/custom");
+    customCrsCatalog.value = items;
+    return items;
+  }
+
+  async function saveCustomCrs(payload: CustomCrsPayload, id?: string) {
+    const item = id
+      ? await apiSend<CrsDefinition>(`/api/crs/custom/${id}`, "PUT", payload)
+      : await apiSend<CrsDefinition>("/api/crs/custom", "POST", payload);
+    await Promise.all([
+      refreshCustomCrsCatalog(),
+      searchCrsCatalog("")
+    ]);
+    setStatus(`已保存自定义坐标系：${item.code}`, "success");
+    return item;
+  }
+
+  async function deleteCustomCrs(id: string) {
+    await apiSend<void>(`/api/crs/custom/${id}`, "DELETE");
+    await Promise.all([
+      refreshCustomCrsCatalog(),
+      searchCrsCatalog("")
+    ]);
+    setStatus("已删除自定义坐标系", "success");
+  }
+
   async function withBusy<T>(task: () => Promise<T>): Promise<T | undefined> {
     busy.value = true;
     try {
@@ -127,7 +168,9 @@ export function useWebGisWorkspace() {
     await withBusy(async () => {
       const [nextDatasources, nextAvailableLayers] = await Promise.all([
         apiGet<Datasource[]>("/api/datasources"),
-        apiGet<LayerRegistration[]>("/api/layers")
+        apiGet<LayerRegistration[]>("/api/layers"),
+        searchCrsCatalog(""),
+        refreshCustomCrsCatalog()
       ]);
       datasources.value = nextDatasources;
       availableLayers.value = nextAvailableLayers;
@@ -429,6 +472,8 @@ export function useWebGisWorkspace() {
     visibleLayerIds,
     visibleLayers,
     displayProjection,
+    crsCatalog,
+    customCrsCatalog,
     canRestoreVisibleLayerIds,
     busy,
     status,
@@ -446,6 +491,10 @@ export function useWebGisWorkspace() {
     loadLayer,
     removeLayer,
     setDisplayProjection,
+    searchCrsCatalog,
+    refreshCustomCrsCatalog,
+    saveCustomCrs,
+    deleteCustomCrs,
     setActiveLayer,
     toggleLayer,
     showOnlyLayer,

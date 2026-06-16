@@ -4,7 +4,7 @@ import { shallowRef } from "vue";
 import WebGisWorkbench from "./WebGisWorkbench.vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import { apiGet, apiSend } from "../../api";
-import type { Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
+import type { CrsDefinition, Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
 
 const sampleDatasources: Datasource[] = [
   {
@@ -131,6 +131,53 @@ const sampleDatasourceForm: DatasourceForm = {
   password: "",
   ssl: false
 };
+const sampleCrsCatalog: CrsDefinition[] = [
+  {
+    id: "local-EPSG-3857",
+    code: "EPSG:3857",
+    authName: "EPSG",
+    authSrid: 3857,
+    srid: 3857,
+    name: "WGS 84 / Pseudo-Mercator",
+    proj4text: "+proj=merc +a=6378137 +b=6378137 +units=m +no_defs",
+    wkt: "",
+    area: "World",
+    scope: "Web map display",
+    source: "postgis",
+    datasourceId: "local",
+    custom: false
+  },
+  {
+    id: "local-EPSG-4326",
+    code: "EPSG:4326",
+    authName: "EPSG",
+    authSrid: 4326,
+    srid: 4326,
+    name: "WGS 84",
+    proj4text: "+proj=longlat +datum=WGS84 +no_defs",
+    wkt: "",
+    area: "World",
+    scope: "Latitude and longitude",
+    source: "postgis",
+    datasourceId: "local",
+    custom: false
+  }
+];
+const customCrs: CrsDefinition = {
+  id: "custom-1",
+  code: "LOCAL:900001",
+  authName: "LOCAL",
+  authSrid: 900001,
+  srid: 900001,
+  name: "成都地方坐标系",
+  proj4text: "+proj=tmerc +lat_0=0 +lon_0=104 +k=1 +x_0=500000 +y_0=0 +units=m +no_defs",
+  wkt: "",
+  area: "成都",
+  scope: "地方工程坐标",
+  source: "custom",
+  custom: true,
+  updatedAt: "2026-06-16T00:00:00.000Z"
+};
 
 const editorMock = {
   drawMode: shallowRef("Point"),
@@ -170,6 +217,19 @@ vi.mock("../../api", () => ({
     }
     if (path === "/api/layers") {
       return sampleLayers;
+    }
+    if (path.startsWith("/api/crs/search")) {
+      const url = new URL(path, "http://localhost");
+      const search = (url.searchParams.get("q") ?? "").toLowerCase();
+      return [...sampleCrsCatalog, customCrs].filter((crs) => (
+        !search
+        || crs.code.toLowerCase().includes(search)
+        || crs.name.toLowerCase().includes(search)
+        || String(crs.srid).includes(search)
+      ));
+    }
+    if (path === "/api/crs/custom") {
+      return [customCrs];
     }
     if (path.startsWith("/api/layers/city/features")) {
       const url = new URL(path, "http://localhost");
@@ -224,6 +284,21 @@ vi.mock("../../api", () => ({
         targetField: (payload as { targetField: string }).targetField,
         affectedRows: 2
       };
+    }
+    if (path === "/api/crs/custom" && method === "POST") {
+      return {
+        ...customCrs,
+        ...(payload as object)
+      };
+    }
+    if (path === "/api/crs/custom/custom-1" && method === "PUT") {
+      return {
+        ...customCrs,
+        ...(payload as object)
+      };
+    }
+    if (path === "/api/crs/custom/custom-1" && method === "DELETE") {
+      return undefined;
     }
     throw new Error(`Unhandled apiSend ${method} ${path}`);
   })
@@ -446,9 +521,7 @@ describe("WebGisWorkbench", () => {
 
     await menuButton("数据库")?.trigger("click");
     const command = wrapper.findAll(".workbench__menu-command")
-      .find((item) => item.text() === "显示链路说明")
-      ?? wrapper.findAll(".workbench__menu-command")
-        .find((item) => item.text() === "新建 PostgreSQL 连接...");
+      .find((item) => item.text() === "新建 PostgreSQL 连接...");
     await command?.trigger("click");
     expect(wrapper.text()).not.toContain("新建 PostgreSQL 连接...");
 
@@ -485,6 +558,7 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.text()).toContain("已添加图层：public.china_2025_city");
     expect(wrapper.text()).toContain("活动图层:public.china_2025_city");
     expect(wrapper.text()).toContain("编辑:关闭");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
     expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
 
     await wrapper.findAll(".datasource-panel__tree-node--layer")
@@ -692,15 +766,16 @@ describe("WebGisWorkbench", () => {
   it("renders live map status labels from the OpenLayers editor", () => {
     const wrapper = mount(WebGisWorkbench);
     const statusbar = wrapper.find(".workbench__statusbar");
-    const crsSelect = statusbar.find("select[aria-label='当前项目显示坐标系']");
+    const crsButton = statusbar.find("button[aria-label='当前项目显示坐标系']");
 
     expect(wrapper.text()).toContain("坐标 104.06480, 30.65720 / EPSG:4326");
     expect(wrapper.text()).toContain("比例尺 1:2,500");
     expect(wrapper.text()).toContain("Zoom 7.25");
     expect(wrapper.text()).not.toContain("EPSG:4326 显示 / EPSG:4326 数据源");
     expect(wrapper.find(".workbench__contextbar select[aria-label='当前项目显示坐标系']").exists()).toBe(false);
-    expect(crsSelect.exists()).toBe(true);
-    expect((crsSelect.element as HTMLSelectElement).value).toBe("EPSG:3857");
+    expect(statusbar.find("select[aria-label='当前项目显示坐标系']").exists()).toBe(false);
+    expect(crsButton.exists()).toBe(true);
+    expect(crsButton.text()).toBe("EPSG:3857");
   });
 
   it("opens QGIS-style CRS settings from the bottom status bar", async () => {
@@ -714,11 +789,13 @@ describe("WebGisWorkbench", () => {
 
     expect(document.body.textContent).toContain("工程坐标参照系 (CRS)");
     expect(document.body.textContent).toContain("最近使用的坐标参照系");
-    expect(document.body.textContent).toContain("预定义坐标参照系");
+    expect(document.body.textContent).toContain("坐标参照系");
+    expect(document.body.textContent).toContain("地方坐标系");
     expect(document.body.textContent).toContain("坐标显示");
     expect(document.body.textContent).toContain("WGS 84 / Pseudo-Mercator");
+    expect(apiGet).toHaveBeenCalledWith(expect.stringContaining("/api/crs/search?"));
 
-    const axisSelect = document.querySelectorAll<HTMLSelectElement>(".workbench__crs-select")[1];
+    const axisSelect = document.querySelectorAll<HTMLSelectElement>(".workbench__crs-select")[0];
     expect(axisSelect).not.toBeNull();
     setNativeInputValue(axisSelect!, "yx");
     axisSelect!.dispatchEvent(new Event("change", { bubbles: true }));

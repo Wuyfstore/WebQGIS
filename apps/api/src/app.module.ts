@@ -8,6 +8,7 @@ import { LayersModule } from "./layers/layers.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { PostgisModule } from "./postgis/postgis.module.js";
 import { ClientLogsModule } from "./client-logs/client-logs.module.js";
+import { CrsModule } from "./crs/crs.module.js";
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { ClientLogsModule } from "./client-logs/client-logs.module.js";
     HealthModule,
     ClientLogsModule,
     DatasourcesModule,
-    LayersModule
+    LayersModule,
+    CrsModule
   ]
 })
 export class AppModule {}

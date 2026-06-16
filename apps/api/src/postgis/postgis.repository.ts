@@ -24,6 +24,7 @@ import {
 } from "../sql.js";
 import { toPoolConfig } from "../types.js";
 import type { AttributeCalculationDto } from "../layers/dto/attribute-calculation.dto.js";
+import type { CrsDefinition } from "../crs/crs.types.js";
 
 type SpatialTableRow = {
   table_schema: string;
@@ -46,6 +47,14 @@ type FieldRow = {
   udt_name: string;
   is_nullable: "YES" | "NO";
   column_default: string | null;
+};
+
+type SpatialRefSysRow = {
+  srid: number;
+  auth_name: string | null;
+  auth_srid: number | null;
+  srtext: string | null;
+  proj4text: string | null;
 };
 
 const supportedGeometryTypes = new Set<GeometryKind>([
@@ -170,6 +179,57 @@ export class PostgisRepository implements OnApplicationShutdown {
       });
     }
     return layers;
+  }
+
+  async searchCoordinateSystems(
+    config: DatasourceConfig,
+    keyword: string,
+    limit: number
+  ): Promise<CrsDefinition[]> {
+    const pool = this.getPool(config);
+    const search = keyword.trim();
+    const values: unknown[] = [Math.max(1, Math.min(limit, 100))];
+    if (search) {
+      values.push(`%${search}%`);
+    }
+    const result = await pool.query<SpatialRefSysRow>(
+      `
+      select srid, auth_name, auth_srid, srtext, proj4text
+      from public.spatial_ref_sys
+      ${search ? `
+      where cast(srid as text) ilike $2
+         or coalesce(auth_name, '') ilike $2
+         or cast(auth_srid as text) ilike $2
+         or coalesce(srtext, '') ilike $2
+         or coalesce(proj4text, '') ilike $2
+      ` : ""}
+      order by
+        case when upper(coalesce(auth_name, '')) = 'EPSG' then 0 else 1 end,
+        auth_srid nulls last,
+        srid
+      limit $1
+      `,
+      values
+    );
+    return result.rows.map((row) => {
+      const authName = row.auth_name ?? "SRID";
+      const authSrid = row.auth_srid ?? row.srid;
+      return {
+        id: `${config.id}-${authName}-${authSrid}-${row.srid}`,
+        code: `${authName}:${authSrid}`,
+        authName,
+        authSrid,
+        srid: row.srid,
+        name: this.readCrsName(row.srtext, `${authName}:${authSrid}`),
+        proj4text: row.proj4text ?? "",
+        wkt: row.srtext ?? "",
+        area: "",
+        scope: "",
+        source: "postgis" as const,
+        datasourceId: config.id,
+        custom: false
+      };
+    });
   }
 
   async readFeature(config: DatasourceConfig, layer: LayerRegistration, pk: string) {
@@ -507,6 +567,11 @@ export class PostgisRepository implements OnApplicationShutdown {
       Number(match[3]),
       Number(match[4])
     ];
+  }
+
+  private readCrsName(wkt: string | null, fallback: string): string {
+    const match = wkt?.match(/^(?:PROJCS|GEOGCS|COMPD_CS|VERT_CS|LOCAL_CS)\["([^"]+)"/);
+    return match?.[1] ?? fallback;
   }
 
   private defaultStyle(index: number): LayerRegistration["style"] {

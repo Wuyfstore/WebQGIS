@@ -106,6 +106,34 @@ export type LayerStyle = LayerRegistration["style"];
 
 export type LayerStylePatch = Partial<LayerStyle>;
 
+export type CrsDefinition = {
+  id: string;
+  code: string;
+  authName: string;
+  authSrid: number;
+  srid: number;
+  name: string;
+  proj4text: string;
+  wkt: string;
+  area: string;
+  scope: string;
+  source: "postgis" | "custom" | "fallback";
+  datasourceId?: string;
+  custom: boolean;
+  updatedAt?: string;
+};
+
+export type CustomCrsPayload = {
+  code: string;
+  name: string;
+  srid: number;
+  proj4text: string;
+  authName: string;
+  wkt: string;
+  area: string;
+  scope: string;
+};
+
 export type ToastTone = "neutral" | "success" | "warning" | "danger";
 
 export type StatusMessage = {

@@ -16,7 +16,7 @@ import DragBox from "ol/interaction/DragBox";
 import { unByKey } from "ol/Observable";
 import { intersects } from "ol/extent";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
-import { fromLonLat, getPointResolution, transform, transformExtent } from "ol/proj";
+import { fromLonLat, get as getProjection, getPointResolution, transform, transformExtent } from "ol/proj";
 import type { Geometry } from "ol/geom";
 import type { FeatureLike } from "ol/Feature";
 import type { DrawEvent } from "ol/interaction/Draw";
@@ -320,7 +320,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     if (projection === "EPSG:4490") {
       return transform(coordinate, "EPSG:3857", "EPSG:4326") as [number, number];
     }
-    if (projection === "EPSG:4547") {
+    if (projection === "EPSG:4547" || !getProjection(projection)) {
       return null;
     }
     return transform(coordinate, "EPSG:3857", projection) as [number, number];
