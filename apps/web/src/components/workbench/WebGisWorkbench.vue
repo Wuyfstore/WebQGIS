@@ -10,6 +10,7 @@ import {
   Link,
   Location,
   Minus,
+  MoreFilled,
   Pointer,
   Rank,
   Refresh,
@@ -25,16 +26,22 @@ import EditInspector from "./EditInspector.vue";
 import { useOpenLayersEditor } from "../../composables/useOpenLayersEditor";
 import { useWebGisWorkspace } from "../../composables/useWebGisWorkspace";
 import type { GeometryMode, LayerStylePatch } from "../../types/gis";
+import type { CoordinateAxisOrder, SelectionMode } from "../../composables/useOpenLayersEditor";
 import { getGeometryModes } from "../../utils/layer";
 
 const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
 const menuRef = useTemplateRef<HTMLElement>("menuRef");
+const selectionToolRef = useTemplateRef<HTMLElement>("selectionToolRef");
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
 const styleEditorLayerId = shallowRef<string | null>(null);
 const editingLayerId = shallowRef<string | null>(null);
 const draggedLayerId = shallowRef<string | null>(null);
+const isSelectionMenuOpen = shallowRef(false);
+const isCrsDialogOpen = shallowRef(false);
+const coordinatePrecision = shallowRef(5);
+const coordinateAxisOrder = shallowRef<CoordinateAxisOrder>("xy");
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -44,6 +51,8 @@ const editor = useOpenLayersEditor({
   selectedFeatureId: workspace.selectedFeatureId,
   draftGeometry: workspace.draftGeometry,
   displayProjection: workspace.displayProjection,
+  coordinatePrecision,
+  coordinateAxisOrder,
   readFeature: workspace.readFeature,
   clearSelection: workspace.clearDraftState,
   setStatus: workspace.setStatus
@@ -76,6 +85,7 @@ const {
 const {
   drawMode,
   activeTool,
+  selectionMode,
   isDrawing,
   isSnapEnabled,
   isDeleteDialogOpen,
@@ -110,6 +120,42 @@ const activeLayerEditStatus = computed(() => {
 });
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
 const projectionOptions = ["EPSG:3857", "EPSG:4326", "EPSG:4490", "EPSG:4547"] as const;
+const crsCatalog = [
+  {
+    code: "EPSG:3857",
+    name: "WGS 84 / Pseudo-Mercator",
+    method: "Web Mercator",
+    scope: "常用 Web 底图显示坐标",
+    area: "World between 85.06°S and 85.06°N"
+  },
+  {
+    code: "EPSG:4326",
+    name: "WGS 84",
+    method: "Lat/long geographic",
+    scope: "全球经纬度数据源和交换坐标",
+    area: "World"
+  },
+  {
+    code: "EPSG:4490",
+    name: "CGCS2000",
+    method: "Geographic 2D",
+    scope: "中国大地坐标系统，经纬度显示",
+    area: "China"
+  },
+  {
+    code: "EPSG:4547",
+    name: "CGCS2000 / 3-degree Gauss-Kruger CM 105E",
+    method: "Transverse Mercator",
+    scope: "中国 3 度带平面坐标，需要注册投影参数后精确转换",
+    area: "China - 104.5E to 107.5E"
+  }
+] as const;
+const selectionModeOptions = [
+  { mode: "click", label: "点击选择", description: "点击单个地图要素并回源读取属性和 geometry" },
+  { mode: "extent", label: "范围选择", description: "在地图上拖拽一个矩形范围，按范围选择要素" },
+  { mode: "customExtent", label: "自定义范围选择", description: "输入 xmin/ymin/xmax/ymax 后执行范围选择" }
+] satisfies { mode: SelectionMode; label: string; description: string }[];
+const coordinatePrecisionOptions = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 const menuItems = [
   "项目",
   "编辑",
@@ -159,6 +205,7 @@ const menuCommands = computed<Record<MenuLabel, MenuCommand[]>>(() => ({
   ],
   设置: [
     { label: "切换吸附", action: editor.toggleSnap, disabled: busy.value },
+    { label: "坐标与 CRS 设置...", action: openCrsDialog, disabled: busy.value },
     { label: "校验编辑状态", action: validateActiveLayer, disabled: busy.value }
   ],
   插件: [
@@ -316,6 +363,16 @@ const toolbarItems = computed<ToolbarItem[]>(() => [
   }
 ]);
 
+const activeSelectionModeLabel = computed(() => (
+  selectionModeOptions.find((option) => option.mode === selectionMode.value)?.label ?? "点击选择"
+));
+const selectedCrs = computed(() => (
+  crsCatalog.find((item) => item.code === displayProjection.value) ?? crsCatalog[0]
+));
+const coordinateSettingsLabel = computed(() => (
+  `${coordinateAxisOrder.value === "xy" ? "X,Y" : "Y,X"} · ${coordinatePrecision.value} 位小数`
+));
+
 onMounted(async () => {
   window.addEventListener("pointerdown", closeMenuOnOutsidePointer);
   window.addEventListener("keydown", closeMenuOnEscape);
@@ -343,18 +400,26 @@ function handleMapReady(element: HTMLDivElement) {
 
 function closeMenuOnOutsidePointer(event: Event) {
   if (!openMenuLabel.value) {
-    return;
+    if (!isSelectionMenuOpen.value) {
+      return;
+    }
   }
   const target = event.target;
   if (target instanceof Node && menuRef.value?.contains(target)) {
     return;
   }
+  if (target instanceof Node && selectionToolRef.value?.contains(target)) {
+    return;
+  }
   openMenuLabel.value = null;
+  isSelectionMenuOpen.value = false;
 }
 
 function closeMenuOnEscape(event: KeyboardEvent) {
   if (event.key === "Escape") {
     openMenuLabel.value = null;
+    isSelectionMenuOpen.value = false;
+    isCrsDialogOpen.value = false;
   }
 }
 
@@ -368,6 +433,41 @@ async function runMenuCommand(command: MenuCommand) {
   }
   openMenuLabel.value = null;
   await command.action();
+}
+
+function toggleSelectionMenu() {
+  if (busy.value) {
+    return;
+  }
+  openMenuLabel.value = null;
+  isSelectionMenuOpen.value = !isSelectionMenuOpen.value;
+}
+
+function setSelectionMode(mode: SelectionMode) {
+  isSelectionMenuOpen.value = false;
+  editor.activateSelectionMode(mode);
+}
+
+function openCrsDialog() {
+  openMenuLabel.value = null;
+  isCrsDialogOpen.value = true;
+}
+
+function closeCrsDialog() {
+  isCrsDialogOpen.value = false;
+}
+
+function applyCrsDialog() {
+  workspace.setStatus(`坐标显示已更新：${displayProjection.value}，${coordinateSettingsLabel.value}`, "success");
+  closeCrsDialog();
+}
+
+function setCoordinatePrecision(event: Event) {
+  coordinatePrecision.value = Number((event.target as HTMLSelectElement).value);
+}
+
+function setCoordinateAxisOrder(event: Event) {
+  coordinateAxisOrder.value = (event.target as HTMLSelectElement).value as CoordinateAxisOrder;
 }
 
 function handleNewDraft() {
@@ -661,19 +761,52 @@ function validateActiveLayer() {
     </header>
 
     <section class="workbench__toolbar" aria-label="QGIS 风格工具栏">
-      <button
+      <div
         v-for="item in toolbarItems"
         :key="item.label"
-        class="workbench__tool focus-ring"
-        :class="{ 'workbench__tool--active': item.active }"
-        :disabled="item.disabled"
-        type="button"
-        :title="item.title"
-        @click="item.action"
+        class="workbench__tool-wrap"
+        :class="{ 'workbench__tool-wrap--select': item.label === '选择' }"
+        :ref="item.label === '选择' ? 'selectionToolRef' : undefined"
       >
-        <component :is="item.icon" class="workbench__tool-icon" aria-hidden="true" />
-        <span class="workbench__tool-label">{{ item.label }}</span>
-      </button>
+        <button
+          class="workbench__tool focus-ring"
+          :class="{ 'workbench__tool--active': item.active }"
+          :disabled="item.disabled"
+          type="button"
+          :title="item.label === '选择' ? activeSelectionModeLabel : item.title"
+          @click="item.label === '选择' ? setSelectionMode(selectionMode) : item.action()"
+        >
+          <component :is="item.icon" class="workbench__tool-icon" aria-hidden="true" />
+          <span class="workbench__tool-label">{{ item.label === "选择" ? activeSelectionModeLabel : item.label }}</span>
+        </button>
+        <button
+          v-if="item.label === '选择'"
+          class="workbench__tool-split focus-ring"
+          :class="{ 'workbench__tool-split--open': isSelectionMenuOpen }"
+          :disabled="item.disabled"
+          type="button"
+          aria-label="选择要素模式"
+          :aria-expanded="isSelectionMenuOpen"
+          @click.stop="toggleSelectionMenu"
+        >
+          <MoreFilled class="workbench__tool-split-icon" aria-hidden="true" />
+        </button>
+        <div v-if="item.label === '选择' && isSelectionMenuOpen" class="workbench__selection-menu" role="menu">
+          <button
+            v-for="option in selectionModeOptions"
+            :key="option.mode"
+            class="workbench__selection-command focus-ring"
+            :class="{ 'workbench__selection-command--active': selectionMode === option.mode }"
+            type="button"
+            role="menuitemradio"
+            :aria-checked="selectionMode === option.mode"
+            @click="setSelectionMode(option.mode)"
+          >
+            <span class="workbench__selection-label">{{ option.label }}</span>
+            <span class="workbench__selection-description">{{ option.description }}</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="workbench__contextbar" aria-label="编辑上下文">
@@ -778,6 +911,14 @@ function validateActiveLayer() {
           </option>
         </select>
       </label>
+      <button
+        class="workbench__status-crs-button focus-ring"
+        type="button"
+        title="打开坐标与 CRS 设置"
+        @click="openCrsDialog"
+      >
+        设置
+      </button>
     </footer>
 
     <Teleport to="body">
@@ -795,6 +936,129 @@ function validateActiveLayer() {
               删除
             </button>
           </div>
+        </section>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="isCrsDialogOpen" class="workbench__dialog-backdrop" @pointerdown.self="closeCrsDialog">
+        <section class="workbench__crs-dialog" role="dialog" aria-modal="true" aria-labelledby="crs-dialog-title">
+          <aside class="workbench__crs-nav" aria-label="工程属性分类">
+            <button class="workbench__crs-nav-item workbench__crs-nav-item--active focus-ring" type="button">CRS</button>
+            <button class="workbench__crs-nav-item focus-ring" type="button">变换</button>
+            <button class="workbench__crs-nav-item focus-ring" type="button">坐标显示</button>
+          </aside>
+          <section class="workbench__crs-content">
+            <header class="workbench__crs-header">
+              <div>
+                <h2 id="crs-dialog-title" class="workbench__dialog-title">工程坐标参照系 (CRS)</h2>
+                <p class="workbench__crs-subtitle">参考 QGIS 工程属性，将项目 CRS 与坐标显示选项集中设置。</p>
+              </div>
+              <button class="workbench__style-dialog-close focus-ring" type="button" aria-label="关闭 CRS 设置" @click="closeCrsDialog">
+                ×
+              </button>
+            </header>
+
+            <label class="workbench__crs-no-projection">
+              <input type="checkbox" disabled />
+              <span>无 CRS (或未知/非地球投影)</span>
+            </label>
+
+            <label class="workbench__crs-filter">
+              <span>过滤</span>
+              <input class="workbench__crs-filter-input focus-ring" type="search" :value="displayProjection" aria-label="过滤 CRS" readonly />
+            </label>
+
+            <div class="workbench__crs-grid">
+              <section class="workbench__crs-section" aria-label="最近使用的坐标参照系">
+                <h3 class="workbench__crs-section-title">最近使用的坐标参照系</h3>
+                <button
+                  class="workbench__crs-row workbench__crs-row--active focus-ring"
+                  type="button"
+                  @click="workspace.setDisplayProjection(displayProjection)"
+                >
+                  <span>{{ selectedCrs.code }} - {{ selectedCrs.name }}</span>
+                  <span>{{ selectedCrs.code }}</span>
+                </button>
+              </section>
+
+              <section class="workbench__crs-section" aria-label="预定义坐标参照系">
+                <div class="workbench__crs-section-heading">
+                  <h3 class="workbench__crs-section-title">预定义坐标参照系</h3>
+                  <label class="workbench__crs-hide-deprecated">
+                    <input type="checkbox" checked />
+                    <span>隐藏弃用 CRS</span>
+                  </label>
+                </div>
+                <button
+                  v-for="projection in crsCatalog"
+                  :key="projection.code"
+                  class="workbench__crs-row focus-ring"
+                  :class="{ 'workbench__crs-row--active': displayProjection === projection.code }"
+                  type="button"
+                  @click="workspace.setDisplayProjection(projection.code)"
+                >
+                  <span>{{ projection.name }}</span>
+                  <span>{{ projection.code }}</span>
+                </button>
+              </section>
+
+              <section class="workbench__crs-section workbench__crs-section--details" aria-label="坐标系详情">
+                <h3 class="workbench__crs-section-title">{{ selectedCrs.name }}</h3>
+                <dl class="workbench__crs-details">
+                  <div>
+                    <dt>授权 ID</dt>
+                    <dd>{{ selectedCrs.code }}</dd>
+                  </div>
+                  <div>
+                    <dt>方法</dt>
+                    <dd>{{ selectedCrs.method }}</dd>
+                  </div>
+                  <div>
+                    <dt>用途</dt>
+                    <dd>{{ selectedCrs.scope }}</dd>
+                  </div>
+                  <div>
+                    <dt>范围</dt>
+                    <dd>{{ selectedCrs.area }}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section class="workbench__crs-section workbench__crs-section--settings" aria-label="坐标显示设置">
+                <h3 class="workbench__crs-section-title">坐标显示</h3>
+                <label class="workbench__crs-setting">
+                  <span>显示 CRS</span>
+                  <select class="workbench__crs-select focus-ring" :value="displayProjection" @change="workspace.setDisplayProjection(($event.target as HTMLSelectElement).value)">
+                    <option v-for="projection in projectionOptions" :key="projection" :value="projection">
+                      {{ projection }}
+                    </option>
+                  </select>
+                </label>
+                <label class="workbench__crs-setting">
+                  <span>坐标顺序</span>
+                  <select class="workbench__crs-select focus-ring" :value="coordinateAxisOrder" @change="setCoordinateAxisOrder">
+                    <option value="xy">X, Y</option>
+                    <option value="yx">Y, X</option>
+                  </select>
+                </label>
+                <label class="workbench__crs-setting">
+                  <span>小数位数</span>
+                  <select class="workbench__crs-select focus-ring" :value="coordinatePrecision" @change="setCoordinatePrecision">
+                    <option v-for="precision in coordinatePrecisionOptions" :key="precision" :value="precision">
+                      {{ precision }}
+                    </option>
+                  </select>
+                </label>
+              </section>
+            </div>
+
+            <footer class="workbench__crs-actions">
+              <button class="workbench__dialog-button focus-ring" type="button" @click="closeCrsDialog">取消</button>
+              <button class="workbench__dialog-button focus-ring" type="button" @click="workspace.setStatus(`已应用坐标设置：${coordinateSettingsLabel}`, 'success')">应用</button>
+              <button class="workbench__dialog-button workbench__dialog-button--primary focus-ring" type="button" @click="applyCrsDialog">确定</button>
+            </footer>
+          </section>
         </section>
       </div>
     </Teleport>
@@ -1002,6 +1266,21 @@ function validateActiveLayer() {
   background: var(--qgis-toolbar);
 }
 
+.workbench__tool-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.workbench__tool-wrap--select .workbench__tool {
+  width: auto;
+  min-width: 78px;
+  grid-auto-flow: column;
+  grid-template-columns: 16px auto;
+  column-gap: 4px;
+  padding: 0 6px;
+}
+
 .workbench__tool {
   position: relative;
   display: grid;
@@ -1037,6 +1316,78 @@ function validateActiveLayer() {
   height: 1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
+}
+
+.workbench__tool-wrap--select .workbench__tool-label {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.workbench__tool-split {
+  display: grid;
+  width: 20px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid #8d8d8d;
+  border-left: 0;
+  background: #efefef;
+  color: var(--qgis-text);
+  padding: 0;
+}
+
+.workbench__tool-split--open {
+  background: #d2d2d2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+.workbench__tool-split-icon {
+  width: 13px;
+  height: 13px;
+  transform: rotate(90deg);
+}
+
+.workbench__selection-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  z-index: var(--qgis-z-menu);
+  width: 260px;
+  border: 1px solid #8d8d8d;
+  background: #f7f7f7;
+  box-shadow: 2px 4px 12px rgba(15, 23, 42, 0.24);
+  padding: 4px;
+}
+
+.workbench__selection-command {
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.workbench__selection-command:hover,
+.workbench__selection-command--active {
+  background: var(--qgis-row-active);
+}
+
+.workbench__selection-label {
+  font-weight: 600;
+}
+
+.workbench__selection-description {
+  color: var(--qgis-muted);
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .workbench__tool--wide .workbench__tool-label,
@@ -1179,6 +1530,15 @@ function validateActiveLayer() {
   font-size: 12px;
 }
 
+.workbench__status-crs-button {
+  min-height: 22px;
+  border: 1px solid #9f9f9f;
+  background: #e8e8e8;
+  color: var(--qgis-text);
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
 .workbench__dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -1195,6 +1555,205 @@ function validateActiveLayer() {
   padding: 18px;
   background: var(--qgis-pane);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.workbench__crs-dialog {
+  display: grid;
+  width: min(860px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  grid-template-columns: 150px minmax(0, 1fr);
+  border: 1px solid #777777;
+  background: var(--qgis-pane);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+.workbench__crs-nav {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  background: #5b5b5b;
+  padding: 8px 0;
+}
+
+.workbench__crs-nav-item {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.workbench__crs-nav-item--active {
+  background: #e8e8e8;
+  color: var(--qgis-text);
+}
+
+.workbench__crs-content {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.workbench__crs-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #c8c8c8;
+  padding-bottom: 8px;
+}
+
+.workbench__crs-subtitle {
+  margin: 0;
+  color: var(--qgis-muted);
+  font-size: 12px;
+}
+
+.workbench__crs-no-projection,
+.workbench__crs-filter,
+.workbench__crs-hide-deprecated,
+.workbench__crs-setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--qgis-text);
+}
+
+.workbench__crs-filter span,
+.workbench__crs-setting span {
+  width: 72px;
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.workbench__crs-filter-input,
+.workbench__crs-select {
+  min-height: 24px;
+  min-width: 0;
+  border: 1px solid #aeb6bf;
+  background: var(--qgis-input);
+  color: var(--qgis-text);
+  padding: 3px 7px;
+}
+
+.workbench__crs-filter-input {
+  flex: 1 1 auto;
+}
+
+.workbench__crs-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 10px;
+}
+
+.workbench__crs-section {
+  border: 1px solid #b6b6b6;
+  background: #f7f7f7;
+}
+
+.workbench__crs-section--details,
+.workbench__crs-section--settings {
+  grid-column: 2;
+}
+
+.workbench__crs-section-title {
+  margin: 0;
+  border-bottom: 1px solid #c8c8c8;
+  background: #e6e6e6;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.workbench__crs-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #c8c8c8;
+  background: #e6e6e6;
+}
+
+.workbench__crs-section-heading .workbench__crs-section-title {
+  border-bottom: 0;
+}
+
+.workbench__crs-hide-deprecated {
+  padding-right: 8px;
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.workbench__crs-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  border: 0;
+  border-bottom: 1px solid #d7d7d7;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.workbench__crs-row:hover,
+.workbench__crs-row--active {
+  background: var(--qgis-row-active);
+}
+
+.workbench__crs-details {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 8px;
+}
+
+.workbench__crs-details div {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.workbench__crs-details dt {
+  color: var(--qgis-muted);
+}
+
+.workbench__crs-details dd {
+  margin: 0;
+}
+
+.workbench__crs-section--settings {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding-bottom: 8px;
+}
+
+.workbench__crs-section--settings .workbench__crs-section-title {
+  margin-bottom: 2px;
+}
+
+.workbench__crs-setting {
+  padding: 0 8px;
+}
+
+.workbench__crs-select {
+  flex: 1 1 auto;
+}
+
+.workbench__crs-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #c8c8c8;
+  padding-top: 10px;
+}
+
+.workbench__dialog-button--primary {
+  border-color: #6f6f6f;
+  background: #d8d8d8;
 }
 
 .workbench__style-dialog {

@@ -135,6 +135,7 @@ const sampleDatasourceForm: DatasourceForm = {
 const editorMock = {
   drawMode: shallowRef("Point"),
   activeTool: shallowRef("select"),
+  selectionMode: shallowRef("click"),
   isDrawing: shallowRef(false),
   isSnapEnabled: shallowRef(true),
   isDeleteDialogOpen: shallowRef(false),
@@ -148,6 +149,7 @@ const editorMock = {
   startDrawing: vi.fn(),
   stopDrawing: vi.fn(),
   activateTool: vi.fn(),
+  activateSelectionMode: vi.fn(),
   toggleSnap: vi.fn(),
   zoomIn: vi.fn(),
   zoomToLayerExtent: vi.fn(() => true),
@@ -329,6 +331,7 @@ describe("WebGisWorkbench", () => {
     });
     editorMock.drawMode.value = "Point";
     editorMock.activeTool.value = "select";
+    editorMock.selectionMode.value = "click";
     editorMock.isDrawing.value = false;
     editorMock.isSnapEnabled.value = true;
     editorMock.isDeleteDialogOpen.value = false;
@@ -555,7 +558,8 @@ describe("WebGisWorkbench", () => {
 
     const tools = wrapper.findAll(".workbench__tool");
     const editTool = tools.find((tool) => tool.attributes("title") === "开启当前图层编辑");
-    const selectTool = tools.find((tool) => tool.attributes("title") === "选择要素");
+    const selectTool = tools.find((tool) => tool.text().includes("点击选择"));
+    const selectionSplit = wrapper.find(".workbench__tool-split");
     const drawPointTool = tools.find((tool) => tool.attributes("title") === "绘制点要素");
     const drawPolygonTool = tools.find((tool) => tool.attributes("title") === "绘制面要素");
     const zoomTool = tools.find((tool) => tool.attributes("title") === "放大一级");
@@ -563,6 +567,7 @@ describe("WebGisWorkbench", () => {
 
     expect(editTool?.exists()).toBe(true);
     expect(selectTool?.exists()).toBe(true);
+    expect(selectionSplit.exists()).toBe(true);
     expect(drawPointTool?.attributes("disabled")).toBeDefined();
     expect(drawPolygonTool?.attributes("disabled")).toBeDefined();
     expect(zoomTool?.exists()).toBe(true);
@@ -590,11 +595,17 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.text()).toContain("属性表单");
 
     await selectTool?.trigger("click");
+    await selectionSplit.trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("范围选择");
+    await wrapper.findAll(".workbench__selection-command")[1].trigger("click");
+    await flushPromises();
     await enabledDrawPolygonTool?.trigger("click");
     await zoomTool?.trigger("click");
     await snapTool?.trigger("click");
 
-    expect(editorMock.activateTool).toHaveBeenCalledWith("select");
+    expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("click");
+    expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("extent");
     expect(editorMock.startDrawing).toHaveBeenCalledWith("Polygon");
     expect(editorMock.zoomIn).toHaveBeenCalled();
     expect(editorMock.activateTool).not.toHaveBeenCalledWith("zoom");
@@ -684,6 +695,38 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.find(".workbench__contextbar select[aria-label='当前项目显示坐标系']").exists()).toBe(false);
     expect(crsSelect.exists()).toBe(true);
     expect((crsSelect.element as HTMLSelectElement).value).toBe("EPSG:3857");
+  });
+
+  it("opens QGIS-style CRS settings from the bottom status bar", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+
+    await wrapper.find(".workbench__status-crs-button").trigger("click");
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("工程坐标参照系 (CRS)");
+    expect(document.body.textContent).toContain("最近使用的坐标参照系");
+    expect(document.body.textContent).toContain("预定义坐标参照系");
+    expect(document.body.textContent).toContain("坐标显示");
+    expect(document.body.textContent).toContain("WGS 84 / Pseudo-Mercator");
+
+    const axisSelect = document.querySelectorAll<HTMLSelectElement>(".workbench__crs-select")[1];
+    expect(axisSelect).not.toBeNull();
+    setNativeInputValue(axisSelect!, "yx");
+    axisSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushPromises();
+
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".workbench__dialog-button"))
+      .find((button) => button.textContent?.trim() === "确定")
+      ?.click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("坐标显示已更新：EPSG:3857，Y,X · 5 位小数");
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
   });
 
   it("opens a map context menu and copies coordinate, scale, and zoom labels", async () => {
@@ -952,18 +995,23 @@ describe("WebGisWorkbench", () => {
 
     await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[2].click();
     await flushPromises();
-    expect(document.body.textContent).toContain("目标字段");
+    expect(document.body.textContent).toContain("字段和值");
+    expect(document.body.textContent).toContain("输出字段");
+    expect(document.body.textContent).toContain("预览 SQL");
+    document.querySelector<HTMLButtonElement>(".attribute-table__calculator-item")?.click();
+    await flushPromises();
     const targetSelect = document.querySelector<HTMLSelectElement>(".attribute-table__tool-input");
     expect(targetSelect).not.toBeNull();
     setNativeInputValue(targetSelect!, "name");
     targetSelect!.dispatchEvent(new Event("change", { bubbles: true }));
-    const expressionInput = document.querySelector<HTMLTextAreaElement>(".attribute-table__tool-textarea");
+    const expressionInput = document.querySelector<HTMLTextAreaElement>(".attribute-table__tool-textarea--expression");
     expect(expressionInput).not.toBeNull();
     setNativeInputValue(expressionInput!, "upper(\"name\")");
     expressionInput!.dispatchEvent(new InputEvent("input", { bubbles: true, data: "upper(\"name\")" }));
     await flushPromises();
-    const calculateButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
-      .find((button) => button.textContent?.trim() === "执行计算")
+    expect(document.querySelector<HTMLTextAreaElement>(".attribute-table__tool-textarea--preview")?.value)
+      .toContain("UPDATE public.china_2025_city");
+    const calculateButton = document.querySelector<HTMLButtonElement>(".attribute-table__calculator-run");
     expect(calculateButton?.disabled).toBe(false);
     calculateButton?.click();
     await flushPromises();

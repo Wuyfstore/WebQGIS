@@ -37,6 +37,32 @@ const calculatorExpression = shallowRef("");
 const calculatorWhere = shallowRef("");
 const sqlDraft = shallowRef("select * from {layer}");
 const sqlLimit = shallowRef(100);
+const calculatorFunctionGroups = [
+  {
+    label: "字符串",
+    items: [
+      { label: "upper", insert: "upper()" },
+      { label: "lower", insert: "lower()" },
+      { label: "concat", insert: "concat(, )" }
+    ]
+  },
+  {
+    label: "数学",
+    items: [
+      { label: "round", insert: "round(, 2)" },
+      { label: "abs", insert: "abs()" },
+      { label: "coalesce", insert: "coalesce(, '')" }
+    ]
+  },
+  {
+    label: "条件",
+    items: [
+      { label: "case when", insert: "case when  then  else  end" },
+      { label: "nullif", insert: "nullif(, )" },
+      { label: "now", insert: "now()" }
+    ]
+  }
+] as const;
 
 const { style: draggableStyle } = useDraggable(panelRef, {
   handle: handleRef,
@@ -96,6 +122,16 @@ const fieldCountLabel = computed(() => (
 const recordCountLabel = computed(() => `${props.features.length}/${props.total} 条记录`);
 const emptyFieldLabel = computed(() => (props.layer.fields.length === 0 ? "暂无字段" : "无匹配字段"));
 const emptyRecordLabel = computed(() => (props.features.length === 0 ? "暂无属性记录" : "无匹配记录"));
+const calculatorPreview = computed(() => {
+  const targetField = calculatorTargetField.value || editablePropertyFields.value[0]?.name || "未选择字段";
+  const expression = calculatorExpression.value.trim() || "未填写表达式";
+  const where = calculatorWhere.value.trim();
+  return [
+    `UPDATE ${props.layer.schema}.${props.layer.table}`,
+    `SET ${targetField} = ${expression}`,
+    where ? `WHERE ${where};` : "WHERE <当前过滤器或全部记录>;"
+  ].join("\n");
+});
 const sortControls = [
   { key: "name", label: "字段" },
   { key: "type", label: "类型" },
@@ -124,6 +160,16 @@ function submitSqlQuery() {
     sql: sqlDraft.value.trim(),
     limit: sqlLimit.value
   });
+}
+
+function insertExpressionToken(token: string) {
+  const prefix = calculatorExpression.value.trim();
+  const spacer = prefix && !prefix.endsWith(" ") ? " " : "";
+  calculatorExpression.value = `${prefix}${spacer}${token}`.trim();
+}
+
+function insertFieldExpression(field: FieldMeta) {
+  insertExpressionToken(`"${field.name}"`);
 }
 
 function columnStyle(column: string) {
@@ -474,40 +520,90 @@ function boolLabel(value: boolean) {
     </template>
 
     <template v-else-if="activeTab === 'calculator'">
-      <section class="attribute-table__tool-panel" aria-label="属性计算器">
-        <label class="attribute-table__tool-field">
-          <span>目标字段</span>
-          <select v-model="calculatorTargetField" class="attribute-table__tool-input focus-ring" :disabled="busy || editablePropertyFields.length === 0">
-            <option value="">选择可编辑字段</option>
-            <option v-for="field in editablePropertyFields" :key="field.name" :value="field.name">
-              {{ field.name }} · {{ typeLabel(field) }}
-            </option>
-          </select>
-        </label>
-        <label class="attribute-table__tool-field attribute-table__tool-field--wide">
-          <span>表达式</span>
-          <textarea
-            v-model="calculatorExpression"
-            class="attribute-table__tool-textarea focus-ring"
-            :disabled="busy"
-            placeholder="例如 upper(&quot;name&quot;) 或 &quot;adcode&quot; + 1"
-          ></textarea>
-        </label>
-        <label class="attribute-table__tool-field attribute-table__tool-field--wide">
-          <span>WHERE 条件</span>
-          <input
-            v-model="calculatorWhere"
-            class="attribute-table__tool-input focus-ring"
-            :disabled="busy"
-            placeholder='可选，例如 "adcode" is not null'
-          />
-        </label>
-        <button class="attribute-table__pager-button focus-ring" :disabled="busy || editablePropertyFields.length === 0 || !calculatorExpression.trim()" type="button" @click="submitCalculation">
-          执行计算
-        </button>
-        <p class="attribute-table__tool-note">
-          字段请使用双引号；服务端仅允许当前图层字段、只读表达式和少量安全函数。
-        </p>
+      <section class="attribute-table__calculator" aria-label="属性计算器">
+        <aside class="attribute-table__calculator-browser" aria-label="字段和函数">
+          <section class="attribute-table__calculator-group">
+            <h3 class="attribute-table__calculator-heading">字段和值</h3>
+            <button
+              v-for="field in propertyFields"
+              :key="field.name"
+              class="attribute-table__calculator-item focus-ring"
+              type="button"
+              @click="insertFieldExpression(field)"
+            >
+              <span class="attribute-table__calculator-item-name">"{{ field.name }}"</span>
+              <span class="attribute-table__calculator-item-meta">{{ typeLabel(field) }}</span>
+            </button>
+          </section>
+          <section v-for="group in calculatorFunctionGroups" :key="group.label" class="attribute-table__calculator-group">
+            <h3 class="attribute-table__calculator-heading">{{ group.label }}</h3>
+            <button
+              v-for="item in group.items"
+              :key="item.label"
+              class="attribute-table__calculator-item focus-ring"
+              type="button"
+              @click="insertExpressionToken(item.insert)"
+            >
+              <span class="attribute-table__calculator-item-name">{{ item.label }}</span>
+              <span class="attribute-table__calculator-item-meta">{{ item.insert }}</span>
+            </button>
+          </section>
+        </aside>
+
+        <section class="attribute-table__calculator-editor" aria-label="表达式编辑">
+          <label class="attribute-table__tool-field">
+            <span>表达式</span>
+            <textarea
+              v-model="calculatorExpression"
+              class="attribute-table__tool-textarea attribute-table__tool-textarea--expression focus-ring"
+              :disabled="busy"
+              spellcheck="false"
+              placeholder="例如 upper(&quot;name&quot;) 或 &quot;adcode&quot; + 1"
+            ></textarea>
+          </label>
+          <div class="attribute-table__calculator-operators" aria-label="常用操作符">
+            <button v-for="operator in ['+', '-', '*', '/', '(', ')', '=', 'and', 'or']" :key="operator" class="attribute-table__operator focus-ring" type="button" @click="insertExpressionToken(operator)">
+              {{ operator }}
+            </button>
+          </div>
+          <label class="attribute-table__tool-field">
+            <span>预览 SQL</span>
+            <textarea class="attribute-table__tool-textarea attribute-table__tool-textarea--preview focus-ring" :value="calculatorPreview" readonly></textarea>
+          </label>
+        </section>
+
+        <aside class="attribute-table__calculator-options" aria-label="输出字段和过滤">
+          <label class="attribute-table__tool-field">
+            <span>输出字段</span>
+            <select v-model="calculatorTargetField" class="attribute-table__tool-input focus-ring" :disabled="busy || editablePropertyFields.length === 0">
+              <option value="">选择可编辑字段</option>
+              <option v-for="field in editablePropertyFields" :key="field.name" :value="field.name">
+                {{ field.name }} · {{ typeLabel(field) }}
+              </option>
+            </select>
+          </label>
+          <label class="attribute-table__tool-field">
+            <span>仅更新匹配要素</span>
+            <input
+              v-model="calculatorWhere"
+              class="attribute-table__tool-input focus-ring"
+              :disabled="busy"
+              placeholder='可选，例如 "adcode" is not null'
+            />
+          </label>
+          <div class="attribute-table__calculator-summary">
+            <span>目标图层</span>
+            <strong>{{ layerLabel }}</strong>
+            <span>可编辑字段</span>
+            <strong>{{ editablePropertyFields.length }} 个</strong>
+          </div>
+          <button class="attribute-table__calculator-run focus-ring" :disabled="busy || editablePropertyFields.length === 0 || !calculatorExpression.trim()" type="button" @click="submitCalculation">
+            执行计算
+          </button>
+          <p class="attribute-table__tool-note">
+            字段请使用双引号；服务端仅允许当前图层字段、只读表达式和少量安全函数。
+          </p>
+        </aside>
       </section>
     </template>
 
@@ -926,6 +1022,144 @@ function boolLabel(value: boolean) {
   font-size: 11px;
 }
 
+.attribute-table__calculator {
+  display: grid;
+  grid-template-columns: 220px minmax(260px, 1fr) 230px;
+  min-height: 360px;
+  background: #f5f5f5;
+}
+
+.attribute-table__calculator-browser,
+.attribute-table__calculator-editor,
+.attribute-table__calculator-options {
+  min-width: 0;
+  border-right: 1px solid #c8c8c8;
+  padding: 10px;
+}
+
+.attribute-table__calculator-browser {
+  max-height: 390px;
+  overflow: auto;
+  background: #eeeeee;
+}
+
+.attribute-table__calculator-editor {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  background: #f8f8f8;
+}
+
+.attribute-table__calculator-options {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  border-right: 0;
+  background: #f1f1f1;
+}
+
+.attribute-table__calculator-group {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.attribute-table__calculator-heading {
+  margin: 0;
+  border: 1px solid #b6b6b6;
+  background: #dedede;
+  color: var(--qgis-text);
+  padding: 5px 7px;
+  font-size: 12px;
+}
+
+.attribute-table__calculator-item {
+  display: grid;
+  min-height: 30px;
+  gap: 2px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 4px 7px;
+  text-align: left;
+}
+
+.attribute-table__calculator-item:hover {
+  border-color: #c8c8c8;
+  background: var(--qgis-row-active);
+}
+
+.attribute-table__calculator-item-name {
+  font-weight: 600;
+}
+
+.attribute-table__calculator-item-meta {
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.attribute-table__tool-textarea--expression {
+  min-height: 136px;
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+.attribute-table__tool-textarea--preview {
+  min-height: 98px;
+  background: #eeeeee;
+  color: var(--qgis-muted);
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+.attribute-table__calculator-operators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.attribute-table__operator {
+  min-width: 34px;
+  min-height: 26px;
+  border: 1px solid #9a9a9a;
+  background: #e8e8e8;
+  color: var(--qgis-text);
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.attribute-table__calculator-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 8px;
+  border: 1px solid #c8c8c8;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.attribute-table__calculator-summary span {
+  color: var(--qgis-muted);
+}
+
+.attribute-table__calculator-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attribute-table__calculator-run {
+  min-height: 30px;
+  border: 1px solid #8f8f8f;
+  background: #d8d8d8;
+  color: var(--qgis-text);
+  padding: 5px 10px;
+  font-weight: 600;
+}
+
+.attribute-table__calculator-run:disabled {
+  color: var(--qgis-muted);
+  opacity: 0.7;
+}
+
 @media (max-width: 760px) {
   .attribute-table {
     width: calc(100vw - 24px);
@@ -950,6 +1184,17 @@ function boolLabel(value: boolean) {
 
   .attribute-table__limit-note {
     white-space: normal;
+  }
+
+  .attribute-table__calculator {
+    grid-template-columns: 1fr;
+  }
+
+  .attribute-table__calculator-browser,
+  .attribute-table__calculator-editor,
+  .attribute-table__calculator-options {
+    border-right: 0;
+    border-bottom: 1px solid #c8c8c8;
   }
 }
 </style>

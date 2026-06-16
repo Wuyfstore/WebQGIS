@@ -23,6 +23,8 @@ import type { Pixel } from "ol/pixel";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
 
 export type MapTool = "select" | "pan" | "identify" | "node" | "draw";
+export type SelectionMode = "click" | "extent" | "customExtent";
+export type CoordinateAxisOrder = "xy" | "yx";
 
 const singleClickEvent = "singleclick" as const;
 const pointerMoveEvent = "pointermove" as const;
@@ -66,12 +68,19 @@ export function formatScaleLabel(scale: number | null) {
   return `比例尺 1:${scale.toLocaleString("zh-Hans-CN")}`;
 }
 
-export function formatCoordinateLabel(coordinate: [number, number] | null, projection: string) {
+export function formatCoordinateLabel(
+  coordinate: [number, number] | null,
+  projection: string,
+  options: { precision?: number; axisOrder?: CoordinateAxisOrder } = {}
+) {
   if (!coordinate) {
     return `坐标 - / ${projection}`;
   }
-  const precision = projection === "EPSG:3857" ? 1 : 5;
-  return `坐标 ${coordinate[0].toFixed(precision)}, ${coordinate[1].toFixed(precision)} / ${projection}`;
+  const precision = options.precision ?? (projection === "EPSG:3857" ? 1 : 5);
+  const values = options.axisOrder === "yx"
+    ? [coordinate[1], coordinate[0]]
+    : coordinate;
+  return `坐标 ${values[0].toFixed(precision)}, ${values[1].toFixed(precision)} / ${projection}`;
 }
 
 export function projectionStatusLabel(displayProjection: string, dataProjection = "EPSG:4326") {
@@ -91,6 +100,8 @@ type UseOpenLayersEditorOptions = {
   selectedFeatureId: Ref<string | null>;
   draftGeometry: Ref<unknown>;
   displayProjection: Ref<string>;
+  coordinatePrecision?: Ref<number>;
+  coordinateAxisOrder?: Ref<CoordinateAxisOrder>;
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
   clearSelection?: () => void;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
@@ -100,12 +111,20 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const map = shallowRef<OlMap | null>(null);
   const drawMode = shallowRef<GeometryMode>("Point");
   const activeTool = shallowRef<MapTool>("select");
+  const selectionMode = shallowRef<SelectionMode>("click");
   const isDrawing = shallowRef(false);
   const isSnapEnabled = shallowRef(true);
   const zoomLevel = shallowRef(4);
   const pointerCoordinate = shallowRef<[number, number] | null>(null);
   const scaleDenominator = shallowRef<number | null>(null);
-  const coordinateLabel = computed(() => formatCoordinateLabel(pointerCoordinate.value, options.displayProjection.value));
+  const coordinateLabel = computed(() => formatCoordinateLabel(
+    pointerCoordinate.value,
+    options.displayProjection.value,
+    {
+      precision: options.coordinatePrecision?.value,
+      axisOrder: options.coordinateAxisOrder?.value
+    }
+  ));
   const scaleLabel = computed(() => formatScaleLabel(scaleDenominator.value));
   const projectionLabel = computed(() => projectionStatusLabel(options.displayProjection.value));
   const layerMap = new globalThis.Map<string, TileLayer<VectorTileSource>>();
@@ -241,6 +260,15 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   function handleMapClick(event: MapBrowserEvent) {
     if (activeTool.value !== "select" && activeTool.value !== "identify") {
+      return;
+    }
+    if (activeTool.value === "select" && selectionMode.value !== "click") {
+      options.setStatus(
+        selectionMode.value === "extent"
+          ? "范围选择已启用：拖拽地图框定选择范围"
+          : "自定义范围选择已启用：请在范围面板输入坐标",
+        "neutral"
+      );
       return;
     }
     const activeTileLayer = options.activeLayer.value ? layerMap.get(options.activeLayer.value.id) : undefined;
@@ -395,7 +423,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     modifyInteraction?.setActive(tool === "node");
 
     if (tool === "select") {
-      options.setStatus("选择工具已启用：点击地图要素读取原始 geometry", "neutral");
+      selectionMode.value = "click";
+      options.setStatus("点击选择已启用：点击地图要素读取原始 geometry", "neutral");
     } else if (tool === "pan") {
       options.setStatus("平移工具已启用：拖拽地图移动视图", "neutral");
     } else if (tool === "identify") {
@@ -405,6 +434,21 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
         editSource.getFeatures().length > 0 ? "节点编辑已启用：拖动节点修改草稿" : "请先选择或绘制要素，再进行节点编辑",
         editSource.getFeatures().length > 0 ? "neutral" : "warning"
       );
+    }
+  }
+
+  function activateSelectionMode(mode: SelectionMode) {
+    stopDrawing();
+    selectionMode.value = mode;
+    activeTool.value = "select";
+    modifyInteraction?.setActive(false);
+
+    if (mode === "click") {
+      options.setStatus("点击选择已启用：点击地图要素读取原始 geometry", "neutral");
+    } else if (mode === "extent") {
+      options.setStatus("范围选择已启用：在地图上拖拽框定范围", "neutral");
+    } else {
+      options.setStatus("自定义范围选择已启用：输入范围坐标后执行选择", "neutral");
     }
   }
 
@@ -492,6 +536,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     zoomLevel,
     drawMode,
     activeTool,
+    selectionMode,
     isDrawing,
     isSnapEnabled,
     isDeleteDialogOpen,
@@ -501,6 +546,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     startDrawing,
     stopDrawing,
     activateTool,
+    activateSelectionMode,
     toggleSnap,
     zoomIn,
     zoomToLayerExtent,
