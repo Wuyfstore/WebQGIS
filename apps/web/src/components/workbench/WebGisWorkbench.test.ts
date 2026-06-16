@@ -279,6 +279,28 @@ function createLayerDragOverEventWithProtectedData(layerId = "city") {
   return event;
 }
 
+function createProtectedLayerDragEvent(type: string) {
+  const event = new Event(type, {
+    bubbles: true,
+    cancelable: true
+  }) as DragEvent;
+  Object.defineProperty(event, "dataTransfer", {
+    value: {
+      dropEffect: "",
+      effectAllowed: "",
+      types: ["application/x-webqgis-layer-id", "text/plain"],
+      getData: () => "",
+      setData: () => undefined
+    }
+  });
+  return event;
+}
+
+function contextMenuItem(label: string) {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item"))
+    .find((button) => button.textContent?.trim() === label);
+}
+
 describe("WebGisWorkbench", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -299,7 +321,8 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.text()).toContain("WebQGIS");
     expect(wrapper.text()).toContain("浏览器");
-    expect(wrapper.text()).toContain("图层与要素属性");
+    expect(wrapper.text()).toContain("图层");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
   });
 
   it("opens the PostGIS connection dialog from the PostgreSQL browser context menu", async () => {
@@ -485,9 +508,15 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
 
     const layerPanelDragOver = createLayerDragOverEventWithProtectedData("province");
+    const provinceSourceLayer = wrapper.findAll(".datasource-panel__tree-node--layer")
+      .find((button) => button.text().includes("public.china_2025_province"));
+    expect(provinceSourceLayer?.exists()).toBe(true);
+    provinceSourceLayer?.element.dispatchEvent(createLayerDragEvent("dragstart", "province"));
+    await flushPromises();
+
     wrapper.find(".layer-panel__dock").element.dispatchEvent(layerPanelDragOver);
     expect(layerPanelDragOver.defaultPrevented).toBe(true);
-    wrapper.find(".layer-panel__dock").element.dispatchEvent(createLayerDragEvent("drop", "province"));
+    wrapper.find(".layer-panel__dock").element.dispatchEvent(createProtectedLayerDragEvent("drop"));
     await flushPromises();
 
     expect(wrapper.findAll(".layer-panel__row")).toHaveLength(2);
@@ -517,11 +546,10 @@ describe("WebGisWorkbench", () => {
     expect(snapTool?.exists()).toBe(true);
     expect(wrapper.text()).toContain("编辑:");
     expect(wrapper.text()).toContain("关闭");
-    expect(wrapper.text()).toContain("开启当前图层编辑后可修改属性");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
+    expect(wrapper.find(".map-canvas__toolbar").exists()).toBe(false);
 
-    await wrapper.findAll(".map-canvas__button")
-      .find((button) => button.text() === "开启编辑")
-      ?.trigger("click");
+    await editTool?.trigger("click");
     await flushPromises();
 
     const activeEditTool = wrapper.findAll(".workbench__tool")
@@ -534,7 +562,9 @@ describe("WebGisWorkbench", () => {
     expect(enabledDrawPointTool?.attributes("disabled")).toBeDefined();
     expect(enabledDrawPolygonTool?.attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("编辑中");
-    expect(wrapper.text()).not.toContain("开启当前图层编辑后可修改属性");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(true);
+    expect(wrapper.find(".map-canvas__toolbar").exists()).toBe(true);
+    expect(wrapper.text()).toContain("属性表单");
 
     await selectTool?.trigger("click");
     await enabledDrawPolygonTool?.trigger("click");
@@ -552,9 +582,71 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.text()).toContain("已切换图层，编辑模式已关闭");
     expect(wrapper.text()).toContain("关闭");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
+    expect(wrapper.find(".map-canvas__toolbar").exists()).toBe(false);
     expect(wrapper.findAll(".workbench__tool")
       .find((tool) => tool.attributes("title") === "绘制面要素")
       ?.attributes("disabled")).toBeDefined();
+  });
+
+  it("supports QGIS-style layer context editing and removal", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_city");
+
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+
+    expect(document.body.textContent).toContain("开启编辑");
+    expect(document.body.textContent).toContain("移除图层");
+    contextMenuItem("开启编辑")?.click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("已开启图层编辑：public.china_2025_city");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(true);
+    expect(wrapper.text()).toContain("编辑中");
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+
+    expect(document.body.textContent).toContain("关闭编辑");
+    contextMenuItem("关闭编辑")?.click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("已关闭图层编辑：public.china_2025_city");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    contextMenuItem("开启编辑")?.click();
+    await flushPromises();
+    expect(wrapper.find(".edit-inspector").exists()).toBe(true);
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    contextMenuItem("移除图层")?.click();
+    await flushPromises();
+
+    expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
+    expect(wrapper.text()).toContain("已移除图层：public.china_2025_city");
+    expect(wrapper.text()).not.toContain("活动图层:public.china_2025_city");
+    expect(wrapper.find(".edit-inspector").exists()).toBe(false);
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
   });
 
   it("renders live map status labels from the OpenLayers editor", () => {
@@ -653,6 +745,8 @@ describe("WebGisWorkbench", () => {
     expect(document.body.textContent).toContain("缩放到图层");
     expect(document.body.textContent).toContain("打开属性表");
     expect(document.body.textContent).toContain("图层样式");
+    expect(document.body.textContent).toContain("开启编辑");
+    expect(document.body.textContent).toContain("移除图层");
     expect(document.querySelector(".workbench__style-dialog")).toBeNull();
     expect(wrapper.find(".layer-panel__style-card").exists()).toBe(false);
 

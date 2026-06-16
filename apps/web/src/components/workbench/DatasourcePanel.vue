@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import { Connection, FolderOpened, Plus, Refresh, Setting } from "@element-plus/icons-vue";
 import type { Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
+import { writeLayerDragPayload } from "../../utils/layerDrag";
 
 const props = withDefaults(defineProps<{
   datasources: Datasource[];
@@ -20,6 +21,8 @@ const emit = defineEmits<{
   save: [];
   scan: [datasourceId: string];
   loadLayer: [layerId: string];
+  layerDragStart: [layerId: string];
+  layerDragEnd: [];
 }>();
 
 const isPostgresExpanded = shallowRef(true);
@@ -110,11 +113,8 @@ function refreshFirstDatasource() {
 }
 
 function startLayerDrag(event: DragEvent, layerId: string) {
-  event.dataTransfer?.setData("application/x-webqgis-layer-id", layerId);
-  event.dataTransfer?.setData("text/plain", layerId);
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "copy";
-  }
+  writeLayerDragPayload(event, layerId);
+  emit("layerDragStart", layerId);
 }
 
 onBeforeUnmount(() => {
@@ -178,6 +178,7 @@ watch(
               type="button"
               @dblclick="emit('loadLayer', layer.id)"
               @dragstart="startLayerDrag($event, layer.id)"
+              @dragend="emit('layerDragEnd')"
             >
               <span class="datasource-panel__layer-icon" aria-hidden="true"></span>
               <span class="datasource-panel__layer-main">

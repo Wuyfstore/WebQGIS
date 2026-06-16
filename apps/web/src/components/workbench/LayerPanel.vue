@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef } from "vue";
 import type { LayerRegistration } from "../../types/gis";
+import { hasLayerDragPayload, readLayerDragPayload } from "../../utils/layerDrag";
 
 const props = defineProps<{
   layers: LayerRegistration[];
   activeLayerId: string;
+  editingLayerId: string | null;
+  dragLayerFallbackId?: string | null;
   visibleLayerIds: Set<string>;
   editableLayerCount: number;
   canRestoreVisibleLayerIds: boolean;
@@ -18,6 +21,9 @@ const emit = defineEmits<{
   zoomToLayer: [layerId: string];
   openAttributeTable: [layerId: string];
   openStyleEditor: [layerId: string];
+  startEditing: [layerId: string];
+  stopEditing: [layerId: string];
+  removeLayer: [layerId: string];
   layerDrop: [layerId: string];
 }>();
 
@@ -32,23 +38,11 @@ const contextMenuStyle = computed(() => ({
   top: `${contextMenu.value.y}px`
 }));
 const contextLayer = computed(() => props.layers.find((layer) => layer.id === contextMenu.value.layerId));
+const isContextLayerEditing = computed(() => Boolean(contextLayer.value && props.editingLayerId === contextLayer.value.id));
 const isLayerDragOver = shallowRef(false);
 
-function readDroppedLayerId(event: DragEvent) {
-  return event.dataTransfer?.getData("application/x-webqgis-layer-id")
-    || event.dataTransfer?.getData("text/plain")
-    || "";
-}
-
-function hasLayerDragPayload(event: DragEvent) {
-  const types = event.dataTransfer?.types;
-  return Boolean(types && Array.from(types).some((type) => (
-    type === "application/x-webqgis-layer-id" || type === "text/plain"
-  )));
-}
-
 function handleLayerDragOver(event: DragEvent) {
-  if (!hasLayerDragPayload(event)) {
+  if (!hasLayerDragPayload(event, props.dragLayerFallbackId)) {
     return;
   }
   event.preventDefault();
@@ -59,7 +53,7 @@ function handleLayerDragOver(event: DragEvent) {
 }
 
 function handleLayerDrop(event: DragEvent) {
-  const layerId = readDroppedLayerId(event);
+  const layerId = readLayerDragPayload(event, props.dragLayerFallbackId);
   if (!layerId) {
     isLayerDragOver.value = false;
     return;
@@ -151,7 +145,7 @@ onBeforeUnmount(() => {
           </button>
 
           <span class="layer-panel__tag" :class="{ 'layer-panel__tag--readonly': !layer.editable }">
-            {{ layer.editable ? "可编辑" : "只读" }}
+            {{ editingLayerId === layer.id ? "编辑中" : layer.editable ? "可编辑" : "只读" }}
           </span>
         </article>
       </div>
@@ -179,6 +173,33 @@ onBeforeUnmount(() => {
         </button>
         <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('openStyleEditor', layerId))">
           图层样式
+        </button>
+        <button
+          v-if="isContextLayerEditing"
+          class="layer-panel__context-item"
+          type="button"
+          role="menuitem"
+          @click="runContextLayerCommand((layerId) => emit('stopEditing', layerId))"
+        >
+          关闭编辑
+        </button>
+        <button
+          v-else
+          class="layer-panel__context-item"
+          :disabled="!contextLayer.editable"
+          type="button"
+          role="menuitem"
+          @click="runContextLayerCommand((layerId) => emit('startEditing', layerId))"
+        >
+          开启编辑
+        </button>
+        <button
+          class="layer-panel__context-item layer-panel__context-item--danger"
+          type="button"
+          role="menuitem"
+          @click="runContextLayerCommand((layerId) => emit('removeLayer', layerId))"
+        >
+          移除图层
         </button>
       </div>
     </Teleport>
@@ -253,7 +274,7 @@ onBeforeUnmount(() => {
 }
 
 .layer-panel__row--active {
-  border-color: #4b8edb;
+  border-color: #777777;
   background: var(--qgis-row-active);
 }
 
@@ -305,6 +326,10 @@ onBeforeUnmount(() => {
 
 .layer-panel__context-item:disabled {
   color: var(--qgis-muted);
+}
+
+.layer-panel__context-item--danger {
+  color: var(--qgis-danger);
 }
 
 .layer-panel__name,

@@ -34,6 +34,7 @@ const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
 const styleEditorLayerId = shallowRef<string | null>(null);
 const editingLayerId = shallowRef<string | null>(null);
+const draggedLayerId = shallowRef<string | null>(null);
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -328,8 +329,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", closeMenuOnEscape);
 });
 
-watch(activeLayerId, () => {
-  if (editingLayerId.value) {
+watch(activeLayerId, (nextLayerId) => {
+  if (editingLayerId.value && editingLayerId.value !== nextLayerId) {
     editingLayerId.value = null;
     handleClearDraft();
     workspace.setStatus("已切换图层，编辑模式已关闭", "neutral");
@@ -423,6 +424,11 @@ function startDrawing(mode?: GeometryMode) {
 
 function toggleEditingActiveLayer() {
   const layer = activeLayer.value;
+  toggleEditingLayer(layer?.id);
+}
+
+function startEditingLayer(layerId: string) {
+  const layer = layers.value.find((item) => item.id === layerId);
   if (!layer) {
     workspace.setStatus("请先选择一个图层", "warning");
     return;
@@ -431,14 +437,31 @@ function toggleEditingActiveLayer() {
     workspace.setStatus(`当前图层只读：${layer.editableReason.join("；") || "缺少可编辑条件"}`, "warning");
     return;
   }
-  if (isEditingActiveLayer.value) {
+  workspace.setActiveLayer(layer.id);
+  editingLayerId.value = layer.id;
+  workspace.setStatus(`已开启图层编辑：${layer.schema}.${layer.table}`, "success");
+}
+
+function stopEditingLayer(layerId: string) {
+  const layer = layers.value.find((item) => item.id === layerId);
+  if (!layer || editingLayerId.value !== layer.id) {
+    return;
+  }
     editingLayerId.value = null;
     handleClearDraft();
     workspace.setStatus(`已关闭图层编辑：${layer.schema}.${layer.table}`, "neutral");
+}
+
+function toggleEditingLayer(layerId?: string) {
+  if (!layerId) {
+    workspace.setStatus("请先选择一个图层", "warning");
     return;
   }
-  editingLayerId.value = layer.id;
-  workspace.setStatus(`已开启图层编辑：${layer.schema}.${layer.table}`, "success");
+  if (editingLayerId.value === layerId) {
+    stopEditingLayer(layerId);
+    return;
+  }
+  startEditingLayer(layerId);
 }
 
 async function handleRefreshAll() {
@@ -467,6 +490,29 @@ async function loadLayerToMap(layerId: string) {
   }
   await nextTick();
   editor.zoomToLayerExtent(layer.id);
+}
+
+function rememberDraggedLayer(layerId: string) {
+  draggedLayerId.value = layerId;
+}
+
+function clearDraggedLayer() {
+  draggedLayerId.value = null;
+}
+
+function removeLoadedLayer(layerId: string) {
+  const layer = workspace.removeLayer(layerId);
+  if (!layer) {
+    return;
+  }
+  if (editingLayerId.value === layer.id) {
+    editingLayerId.value = null;
+    handleClearDraft();
+  }
+  if (styleEditorLayerId.value === layer.id) {
+    closeStyleEditor();
+  }
+  editor.refreshLayer(activeLayer.value?.id);
 }
 
 function toggleActiveLayerVisibility() {
@@ -620,7 +666,7 @@ function validateActiveLayer() {
       <span class="workbench__context-note">编辑链路: 原始 PostGIS geometry</span>
     </section>
 
-    <section class="workbench__body">
+    <section class="workbench__body" :class="{ 'workbench__body--editing': isEditingActiveLayer }">
       <aside class="workbench__left-dock" aria-label="浏览器与图层">
         <DatasourcePanel
           :datasources="datasources"
@@ -632,11 +678,15 @@ function validateActiveLayer() {
           @save="workspace.saveDatasource"
           @scan="workspace.scanDatasource"
           @load-layer="loadLayerToMap"
+          @layer-drag-start="rememberDraggedLayer"
+          @layer-drag-end="clearDraggedLayer"
         />
 
         <LayerPanel
           :layers="layers"
           :active-layer-id="activeLayerId"
+          :editing-layer-id="editingLayerId"
+          :drag-layer-fallback-id="draggedLayerId"
           :visible-layer-ids="visibleLayerIds"
           :editable-layer-count="editableLayerCount"
           :can-restore-visible-layer-ids="canRestoreVisibleLayerIds"
@@ -647,6 +697,9 @@ function validateActiveLayer() {
           @zoom-to-layer="zoomToLayer"
           @open-attribute-table="openAttributeTable"
           @open-style-editor="openStyleEditor"
+          @start-editing="startEditingLayer"
+          @stop-editing="stopEditingLayer"
+          @remove-layer="removeLoadedLayer"
           @layer-drop="loadLayerToMap"
         />
       </aside>
@@ -654,6 +707,7 @@ function validateActiveLayer() {
       <MapCanvas
         v-model:draw-mode="drawMode"
         :active-layer="activeLayer"
+        :drag-layer-fallback-id="draggedLayerId"
         :busy="busy"
         :has-draft-geometry="hasDraftGeometry"
         :has-selected-feature="hasSelectedFeature"
@@ -670,6 +724,7 @@ function validateActiveLayer() {
       />
 
       <EditInspector
+        v-if="isEditingActiveLayer"
         v-model:selected-properties="selectedProperties"
         :active-layer="activeLayer"
         :editable-fields="editableFields"
@@ -998,17 +1053,21 @@ function validateActiveLayer() {
 }
 
 .workbench__context-badge {
-  border: 1px solid #6f9fc9;
-  background: var(--qgis-blue-soft);
-  color: var(--qgis-blue);
+  border: 1px solid #8f8f8f;
+  background: #e8e8e8;
+  color: var(--qgis-text);
   padding: 2px 16px;
 }
 
 .workbench__body {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: 330px minmax(520px, 1fr) 360px;
+  grid-template-columns: 330px minmax(520px, 1fr);
   min-height: 0;
+}
+
+.workbench__body--editing {
+  grid-template-columns: 330px minmax(520px, 1fr) 360px;
 }
 
 .workbench__left-dock {
@@ -1197,6 +1256,10 @@ function validateActiveLayer() {
 
 @media (max-width: 1100px) {
   .workbench__body {
+    grid-template-columns: 300px minmax(520px, 1fr);
+  }
+
+  .workbench__body--editing {
     grid-template-columns: 300px minmax(520px, 1fr);
   }
 

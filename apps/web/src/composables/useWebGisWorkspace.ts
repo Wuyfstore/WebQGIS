@@ -173,6 +173,30 @@ export function useWebGisWorkspace() {
     return layer;
   }
 
+  function removeLayer(layerId: string) {
+    const layer = layers.value.find((item) => item.id === layerId);
+    if (!layer) {
+      setStatus("未找到要移除的图层", "warning");
+      return undefined;
+    }
+    const nextLoaded = new Set(loadedLayerIds.value);
+    nextLoaded.delete(layer.id);
+    replaceLoadedLayerIds(nextLoaded);
+    replaceVisibleLayerIds(new Set([...visibleLayerIds.value].filter((visibleLayerId) => visibleLayerId !== layer.id)));
+    previousVisibleLayerIds.value = previousVisibleLayerIds.value
+      ? new Set([...previousVisibleLayerIds.value].filter((visibleLayerId) => visibleLayerId !== layer.id))
+      : null;
+    if (attributeTableLayerId.value === layer.id) {
+      closeAttributeTable();
+    }
+    if (activeLayerId.value === layer.id) {
+      activeLayerId.value = nextLoaded.values().next().value ?? "";
+      clearDraftState();
+    }
+    setStatus(`已移除图层：${layer.schema}.${layer.table}`, "success");
+    return layer;
+  }
+
   function setActiveLayer(layerId: string) {
     activeLayerId.value = layerId;
     clearDraftState();
@@ -386,6 +410,7 @@ export function useWebGisWorkspace() {
     saveDatasource,
     scanDatasource,
     loadLayer,
+    removeLayer,
     setDisplayProjection,
     setActiveLayer,
     toggleLayer,

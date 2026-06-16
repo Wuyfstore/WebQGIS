@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, useTemplateRef } from "vue";
 import { getGeometryModes } from "../../utils/layer";
+import { hasLayerDragPayload, readLayerDragPayload } from "../../utils/layerDrag";
 import type { GeometryMode, LayerRegistration } from "../../types/gis";
 
 const props = defineProps<{
   activeLayer?: LayerRegistration;
+  dragLayerFallbackId?: string | null;
   busy: boolean;
   hasDraftGeometry: boolean;
   hasSelectedFeature: boolean;
@@ -29,21 +31,8 @@ const mapRoot = useTemplateRef<HTMLDivElement>("mapRoot");
 const isLayerDragOver = shallowRef(false);
 const geometryModes = computed(() => getGeometryModes(props.activeLayer));
 
-function readDroppedLayerId(event: DragEvent) {
-  return event.dataTransfer?.getData("application/x-webqgis-layer-id")
-    || event.dataTransfer?.getData("text/plain")
-    || "";
-}
-
-function hasLayerDragPayload(event: DragEvent) {
-  const types = event.dataTransfer?.types;
-  return Boolean(types && Array.from(types).some((type) => (
-    type === "application/x-webqgis-layer-id" || type === "text/plain"
-  )));
-}
-
 function handleLayerDragOver(event: DragEvent) {
-  if (!hasLayerDragPayload(event)) {
+  if (!hasLayerDragPayload(event, props.dragLayerFallbackId)) {
     return;
   }
   event.preventDefault();
@@ -54,7 +43,7 @@ function handleLayerDragOver(event: DragEvent) {
 }
 
 function handleLayerDrop(event: DragEvent) {
-  const layerId = readDroppedLayerId(event);
+  const layerId = readLayerDragPayload(event, props.dragLayerFallbackId);
   if (!layerId) {
     isLayerDragOver.value = false;
     return;
@@ -87,7 +76,7 @@ onMounted(() => {
       <div v-if="isLayerDragOver" class="map-canvas__drop-hint">释放以添加空间图层</div>
     </div>
 
-    <div class="map-canvas__toolbar" aria-label="编辑工具栏">
+    <div v-if="isEditingLayer" class="map-canvas__toolbar" aria-label="编辑工具栏">
       <div class="map-canvas__toolbar-title">
         活动图层: {{ activeLayer ? `${activeLayer.schema}.${activeLayer.table}` : "未选择" }}
       </div>
