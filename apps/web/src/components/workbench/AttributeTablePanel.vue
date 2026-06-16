@@ -630,7 +630,7 @@ function boolLabel(value: boolean) {
           执行 SQL
         </button>
         <p class="attribute-table__tool-note">
-          仅允许当前图层的单条 SELECT，可使用 {layer} 代表当前表；服务端强制只读事务和 LIMIT。
+          仅允许当前图层的单条 SELECT；推荐使用 {layer} 代表当前表，也支持当前表名占位符 {schema.table}；服务端强制只读事务和 LIMIT。
         </p>
       </section>
       <div v-if="sqlResult" class="attribute-table__table-wrap">

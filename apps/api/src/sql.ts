@@ -87,7 +87,7 @@ export function assertSingleReadonlySelect(sql: string): string {
 
 export function buildSafeLayerSelectSql(layer: LayerRegistration, sql: string, limit: number): string {
   const selectSql = assertSingleReadonlySelect(sql);
-  const layerTokenSql = selectSql.replaceAll("{layer}", qualifiedTable(layer));
+  const layerTokenSql = replaceLayerPlaceholders(layer, selectSql);
   const tablePattern = new RegExp(
     `\\bfrom\\s+${escapeRegExp(qualifiedTable(layer)).replace("\\.", "\\s*\\.\\s*")}(?:\\s|$)`,
     "i"
@@ -100,6 +100,19 @@ export function buildSafeLayerSelectSql(layer: LayerRegistration, sql: string, l
     throw new Error("SQL must query the current layer table or use {layer}");
   }
   return `select * from (${layerTokenSql}) webqgis_safe_query limit ${Math.max(1, Math.min(200, limit))}`;
+}
+
+function replaceLayerPlaceholders(layer: LayerRegistration, sql: string): string {
+  return sql.replace(/\{([^{}]+)\}/g, (placeholder, token: string) => {
+    const normalizedToken = token.trim();
+    if (normalizedToken === "layer") {
+      return qualifiedTable(layer);
+    }
+    if (normalizedToken === `${layer.schema}.${layer.table}`) {
+      return qualifiedTable(layer);
+    }
+    throw new Error(`SQL placeholder ${placeholder} must be {layer} or {${layer.schema}.${layer.table}}`);
+  });
 }
 
 export function buildSafeAttributeExpression(layer: LayerRegistration, expression: string): string {

@@ -67,10 +67,16 @@ describe("safe SQL helpers", () => {
       .toBe('select * from (select id, name from "public"."cities") webqgis_safe_query limit 50');
   });
 
+  it("allows the current layer schema.table placeholder", () => {
+    expect(buildSafeLayerSelectSql(layer, "select id, name from {public.cities}", 25))
+      .toBe('select * from (select id, name from "public"."cities") webqgis_safe_query limit 25');
+  });
+
   it("rejects non-readonly or multi-statement SQL", () => {
     expect(() => buildSafeLayerSelectSql(layer, "delete from {layer}", 50)).toThrow("Only SELECT");
     expect(() => buildSafeLayerSelectSql(layer, "select * from {layer}; drop table users", 50)).toThrow("single read-only");
     expect(() => buildSafeLayerSelectSql(layer, "select * from other.table", 50)).toThrow("current layer");
+    expect(() => buildSafeLayerSelectSql(layer, "select * from {public.roads}", 50)).toThrow("must be {layer}");
   });
 
   it("allows field based calculation expressions", () => {
