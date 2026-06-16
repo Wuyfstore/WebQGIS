@@ -254,8 +254,26 @@ function createLayerDragEvent(type: string, layerId = "city") {
     value: {
       dropEffect: "",
       effectAllowed: "",
+      types: Array.from(data.keys()),
       getData: (format: string) => data.get(format) ?? "",
       setData: (format: string, value: string) => data.set(format, value)
+    }
+  });
+  return event;
+}
+
+function createLayerDragOverEventWithProtectedData(layerId = "city") {
+  const event = new Event("dragover", {
+    bubbles: true,
+    cancelable: true
+  }) as DragEvent;
+  Object.defineProperty(event, "dataTransfer", {
+    value: {
+      dropEffect: "",
+      effectAllowed: "",
+      types: ["application/x-webqgis-layer-id", "text/plain"],
+      getData: () => "",
+      setData: () => undefined
     }
   });
   return event;
@@ -456,7 +474,9 @@ describe("WebGisWorkbench", () => {
     await flushPromises();
     await expandDatasource(wrapper);
 
-    wrapper.find(".map-canvas__map").element.dispatchEvent(createLayerDragEvent("dragover", "city"));
+    const mapDragOver = createLayerDragOverEventWithProtectedData("city");
+    wrapper.find(".map-canvas__map").element.dispatchEvent(mapDragOver);
+    expect(mapDragOver.defaultPrevented).toBe(true);
     wrapper.find(".map-canvas__map").element.dispatchEvent(createLayerDragEvent("drop", "city"));
     await flushPromises();
 
@@ -464,7 +484,9 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.text()).toContain("public.china_2025_city");
     expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
 
-    wrapper.find(".layer-panel__dock").element.dispatchEvent(createLayerDragEvent("dragover", "province"));
+    const layerPanelDragOver = createLayerDragOverEventWithProtectedData("province");
+    wrapper.find(".layer-panel__dock").element.dispatchEvent(layerPanelDragOver);
+    expect(layerPanelDragOver.defaultPrevented).toBe(true);
     wrapper.find(".layer-panel__dock").element.dispatchEvent(createLayerDragEvent("drop", "province"));
     await flushPromises();
 

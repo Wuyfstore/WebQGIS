@@ -35,8 +35,15 @@ function readDroppedLayerId(event: DragEvent) {
     || "";
 }
 
+function hasLayerDragPayload(event: DragEvent) {
+  const types = event.dataTransfer?.types;
+  return Boolean(types && Array.from(types).some((type) => (
+    type === "application/x-webqgis-layer-id" || type === "text/plain"
+  )));
+}
+
 function handleLayerDragOver(event: DragEvent) {
-  if (!readDroppedLayerId(event)) {
+  if (!hasLayerDragPayload(event)) {
     return;
   }
   event.preventDefault();
