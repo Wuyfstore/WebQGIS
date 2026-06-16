@@ -542,7 +542,7 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.text()).toContain("Docker PostGIS Test");
     expect(wrapper.text()).toContain("从浏览器拖入空间表以添加图层");
-    expect(wrapper.text()).toContain("活动图层:未选择");
+    expect((wrapper.find("select[aria-label='选择活动图层']").element as HTMLSelectElement).value).toBe("");
 
     await expandDatasource(wrapper);
 
@@ -556,8 +556,12 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
     expect(wrapper.text()).toContain("已添加图层：public.china_2025_city");
-    expect(wrapper.text()).toContain("活动图层:public.china_2025_city");
-    expect(wrapper.text()).toContain("编辑:关闭");
+    const activeLayerSelect = wrapper.find("select[aria-label='选择活动图层']");
+    expect((activeLayerSelect.element as HTMLSelectElement).value).toBe("city");
+    expect(activeLayerSelect.findAll("option").map((option) => option.text())).toContain("public.china_2025_city");
+    expect(wrapper.text()).not.toContain("显示链路:");
+    expect(wrapper.text()).not.toContain("编辑链路:");
+    expect(wrapper.text()).not.toContain("编辑:");
     expect(wrapper.find(".edit-inspector").exists()).toBe(false);
     expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
 
@@ -645,8 +649,7 @@ describe("WebGisWorkbench", () => {
     expect(drawPolygonTool?.attributes("disabled")).toBeDefined();
     expect(zoomTool?.exists()).toBe(true);
     expect(snapTool?.exists()).toBe(true);
-    expect(wrapper.text()).toContain("编辑:");
-    expect(wrapper.text()).toContain("关闭");
+    expect((wrapper.find("select[aria-label='选择活动图层']").element as HTMLSelectElement).value).toBe("city");
     expect(wrapper.find(".edit-inspector").exists()).toBe(false);
     expect(wrapper.find(".map-canvas__toolbar").exists()).toBe(false);
 
@@ -703,6 +706,41 @@ describe("WebGisWorkbench", () => {
       ?.attributes("disabled")).toBeDefined();
   });
 
+  it("switches active layers from the context bar and hides snap details when snapping is off", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper);
+
+    const contextbar = wrapper.find(".workbench__contextbar");
+    const activeLayerSelect = contextbar.find("select[aria-label='选择活动图层']");
+
+    expect(activeLayerSelect.exists()).toBe(true);
+    expect((activeLayerSelect.element as HTMLSelectElement).value).toBe("city");
+    expect(activeLayerSelect.findAll("option").map((option) => option.text())).toEqual([
+      "未选择",
+      "public.china_2025_province",
+      "public.china_2025_city"
+    ]);
+    expect(contextbar.text()).toContain("捕捉:");
+    expect(contextbar.text()).toContain("顶点 + 线段, 8 px");
+    expect(contextbar.text()).not.toContain("编辑:");
+    expect(contextbar.text()).not.toContain("显示链路:");
+    expect(contextbar.text()).not.toContain("编辑链路:");
+
+    setNativeInputValue(activeLayerSelect.element as HTMLSelectElement, "province");
+    await activeLayerSelect.trigger("change");
+    await flushPromises();
+
+    expect((activeLayerSelect.element as HTMLSelectElement).value).toBe("province");
+
+    editorMock.isSnapEnabled.value = false;
+    await flushPromises();
+
+    expect(wrapper.find(".workbench__contextbar").text()).not.toContain("捕捉:");
+    expect(wrapper.find(".workbench__contextbar").text()).not.toContain("顶点 + 线段, 8 px");
+  });
+
   it("supports QGIS-style layer context editing and removal", async () => {
     const wrapper = mount(WebGisWorkbench, {
       attachTo: document.body
@@ -756,7 +794,7 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
     expect(wrapper.text()).toContain("已移除图层：public.china_2025_city");
-    expect(wrapper.text()).not.toContain("活动图层:public.china_2025_city");
+    expect((wrapper.find("select[aria-label='选择活动图层']").element as HTMLSelectElement).value).not.toBe("city");
     expect(wrapper.find(".edit-inspector").exists()).toBe(false);
 
     wrapper.unmount();

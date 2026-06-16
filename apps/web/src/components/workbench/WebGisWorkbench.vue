@@ -118,21 +118,9 @@ const statusClasses = computed(() => ({
   "workbench__status--warning": status.value.tone === "warning",
   "workbench__status--danger": status.value.tone === "danger"
 }));
-const activeLayerLabel = computed(() => (
-  activeLayer.value ? `${activeLayer.value.schema}.${activeLayer.value.table}` : "未选择"
-));
 const styleEditorLayer = computed(() => (
   layers.value.find((layer) => layer.id === styleEditorLayerId.value) ?? null
 ));
-const activeLayerEditStatus = computed(() => {
-  if (!activeLayer.value) {
-    return "未选择";
-  }
-  if (!activeLayer.value.editable) {
-    return "只读";
-  }
-  return isEditingActiveLayer.value ? "编辑中" : "关闭";
-});
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
 const fallbackCrs = computed<CrsDefinition>(() => ({
   id: `current-${displayProjection.value}`,
@@ -547,6 +535,14 @@ function setCoordinateAxisOrder(event: Event) {
   coordinateAxisOrder.value = (event.target as HTMLSelectElement).value as CoordinateAxisOrder;
 }
 
+function setActiveLayerFromContext(event: Event) {
+  const layerId = (event.target as HTMLSelectElement).value;
+  if (!layerId) {
+    return;
+  }
+  workspace.setActiveLayer(layerId);
+}
+
 function handleNewDraft() {
   if (!isEditingActiveLayer.value) {
     workspace.setStatus("请先开启当前图层编辑", "warning");
@@ -882,13 +878,22 @@ function validateActiveLayer() {
 
     <section class="workbench__contextbar" aria-label="编辑上下文">
       <span class="workbench__context-label">活动图层:</span>
-      <span class="workbench__context-field">{{ activeLayerLabel }}</span>
-      <span class="workbench__context-label">编辑:</span>
-      <span class="workbench__context-badge">{{ activeLayerEditStatus }}</span>
-      <span class="workbench__context-label">捕捉:</span>
-      <span class="workbench__context-field">顶点 + 线段, 8 px</span>
-      <span class="workbench__context-note">显示链路: MVT</span>
-      <span class="workbench__context-note">编辑链路: 原始 PostGIS geometry</span>
+      <select
+        class="workbench__context-select focus-ring"
+        :value="activeLayerId"
+        :disabled="busy || layers.length === 0"
+        aria-label="选择活动图层"
+        @change="setActiveLayerFromContext"
+      >
+        <option value="" disabled>未选择</option>
+        <option v-for="layer in layers" :key="layer.id" :value="layer.id">
+          {{ layer.schema }}.{{ layer.table }}
+        </option>
+      </select>
+      <template v-if="isSnapEnabled">
+        <span class="workbench__context-label">捕捉:</span>
+        <span class="workbench__context-field">顶点 + 线段, 8 px</span>
+      </template>
     </section>
 
     <section class="workbench__body" :class="{ 'workbench__body--editing': isEditingActiveLayer }">
