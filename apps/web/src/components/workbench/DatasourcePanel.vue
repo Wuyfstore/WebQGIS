@@ -46,6 +46,14 @@ function datasourceLayers(datasourceId: string) {
   return props.availableLayers.filter((layer) => layer.datasourceId === datasourceId);
 }
 
+function isDatasourceScanning(datasourceId: string) {
+  return props.busy && scannedDatasourceIds.value.has(datasourceId) && datasourceLayers(datasourceId).length === 0;
+}
+
+function shouldShowDatasourceEmpty(datasourceId: string) {
+  return !props.busy && scannedDatasourceIds.value.has(datasourceId) && datasourceLayers(datasourceId).length === 0;
+}
+
 function openContextMenu(event: MouseEvent) {
   event.preventDefault();
   contextMenu.value = {
@@ -180,8 +188,11 @@ watch(
                 {{ loadedLayerIds.has(layer.id) ? "已加载" : layer.editable ? "可编辑" : "只读" }}
               </span>
             </button>
-            <div v-if="datasourceLayers(datasource.id).length === 0" class="datasource-panel__tree-empty">
-              暂无空间表，点击连接会扫描数据库。
+            <div v-if="isDatasourceScanning(datasource.id)" class="datasource-panel__tree-empty">
+              正在扫描空间表...
+            </div>
+            <div v-else-if="shouldShowDatasourceEmpty(datasource.id)" class="datasource-panel__tree-empty">
+              未扫描到空间表，请刷新连接重试。
             </div>
           </div>
         </div>

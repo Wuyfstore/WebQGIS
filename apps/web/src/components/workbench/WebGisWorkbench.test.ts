@@ -2,8 +2,9 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shallowRef } from "vue";
 import WebGisWorkbench from "./WebGisWorkbench.vue";
+import DatasourcePanel from "./DatasourcePanel.vue";
 import { apiGet, apiSend } from "../../api";
-import type { Datasource, LayerRegistration } from "../../types/gis";
+import type { Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
 
 const sampleDatasources: Datasource[] = [
   {
@@ -121,6 +122,15 @@ const sampleLayers: LayerRegistration[] = [
     updatedAt: "2026-06-12T00:00:00.000Z"
   }
 ];
+const sampleDatasourceForm: DatasourceForm = {
+  name: "Docker PostGIS Test",
+  host: "127.0.0.1",
+  port: 5432,
+  database: "test",
+  user: "postgres",
+  password: "",
+  ssl: false
+};
 
 const editorMock = {
   drawMode: shallowRef("Point"),
@@ -417,6 +427,28 @@ describe("WebGisWorkbench", () => {
 
     expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
     expect(wrapper.text()).toContain("已激活图层：public.china_2025_city");
+  });
+
+  it("shows a scanning state instead of an empty spatial table message while a datasource scan is running", async () => {
+    const wrapper = mount(DatasourcePanel, {
+      props: {
+        datasources: sampleDatasources,
+        availableLayers: [],
+        loadedLayerIds: new Set<string>(),
+        busy: false,
+        connectionDialogRequestKey: 0,
+        form: sampleDatasourceForm,
+        "onUpdate:form": () => undefined
+      }
+    });
+
+    await wrapper.find(".datasource-panel__tree-node--source").trigger("click");
+    await wrapper.setProps({ busy: true });
+
+    expect(wrapper.text()).toContain("正在扫描空间表...");
+    expect(wrapper.text()).not.toContain("暂无空间表");
+    expect(wrapper.text()).not.toContain("未扫描到空间表");
+    expect(wrapper.emitted("scan")?.[0]).toEqual(["local"]);
   });
 
   it("loads spatial tables when dropped on the map canvas or layer panel", async () => {
