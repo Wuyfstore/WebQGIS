@@ -674,11 +674,16 @@ describe("WebGisWorkbench", () => {
 
   it("renders live map status labels from the OpenLayers editor", () => {
     const wrapper = mount(WebGisWorkbench);
+    const statusbar = wrapper.find(".workbench__statusbar");
+    const crsSelect = statusbar.find("select[aria-label='当前项目显示坐标系']");
 
     expect(wrapper.text()).toContain("坐标 104.06480, 30.65720 / EPSG:4326");
     expect(wrapper.text()).toContain("比例尺 1:2,500");
-    expect(wrapper.text()).toContain("EPSG:4326 显示 / EPSG:4326 数据源");
     expect(wrapper.text()).toContain("Zoom 7.25");
+    expect(wrapper.text()).not.toContain("EPSG:4326 显示 / EPSG:4326 数据源");
+    expect(wrapper.find(".workbench__contextbar select[aria-label='当前项目显示坐标系']").exists()).toBe(false);
+    expect(crsSelect.exists()).toBe(true);
+    expect((crsSelect.element as HTMLSelectElement).value).toBe("EPSG:3857");
   });
 
   it("opens a map context menu and copies coordinate, scale, and zoom labels", async () => {

@@ -81,7 +81,6 @@ const {
   isDeleteDialogOpen,
   coordinateLabel,
   scaleLabel,
-  projectionLabel,
   zoomLevel
 } = editor;
 
@@ -684,20 +683,6 @@ function validateActiveLayer() {
       <span class="workbench__context-badge">{{ activeLayerEditStatus }}</span>
       <span class="workbench__context-label">捕捉:</span>
       <span class="workbench__context-field">顶点 + 线段, 8 px</span>
-      <div class="workbench__crs-panel" aria-label="QGIS 风格坐标参考系统">
-        <span class="workbench__crs-title">项目 CRS</span>
-        <select
-          class="workbench__context-select focus-ring"
-          :value="displayProjection"
-          aria-label="当前项目显示坐标系"
-          @change="workspace.setDisplayProjection(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="projection in projectionOptions" :key="projection" :value="projection">
-            {{ projection }}
-          </option>
-        </select>
-        <span class="workbench__crs-hint">{{ projectionLabel }}</span>
-      </div>
       <span class="workbench__context-note">显示链路: MVT</span>
       <span class="workbench__context-note">编辑链路: 原始 PostGIS geometry</span>
     </section>
@@ -777,10 +762,22 @@ function validateActiveLayer() {
     <footer class="workbench__statusbar">
       <span>{{ coordinateLabel }}</span>
       <span>{{ scaleLabel }}</span>
-      <span>{{ projectionLabel }}</span>
       <span>Zoom {{ zoomLevel.toFixed(2) }}</span>
       <span class="workbench__statusbar-ok">捕捉: 顶点+线段 8 px</span>
       <span :class="statusClasses" class="workbench__status" role="status">{{ status.text }}</span>
+      <label class="workbench__status-crs" title="当前项目显示坐标系">
+        <span class="workbench__status-crs-label">CRS</span>
+        <select
+          class="workbench__status-crs-select focus-ring"
+          :value="displayProjection"
+          aria-label="当前项目显示坐标系"
+          @change="workspace.setDisplayProjection(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="projection in projectionOptions" :key="projection" :value="projection">
+            {{ projection }}
+          </option>
+        </select>
+      </label>
     </footer>
 
     <Teleport to="body">
@@ -1095,32 +1092,6 @@ function validateActiveLayer() {
   padding: 2px 6px;
 }
 
-.workbench__crs-panel {
-  display: grid;
-  grid-template-columns: auto 120px minmax(180px, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-width: 420px;
-  border: 1px solid #b4b4b4;
-  background: #eeeeee;
-  padding: 3px 8px;
-}
-
-.workbench__crs-title {
-  color: var(--qgis-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.workbench__crs-hint {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--qgis-muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .workbench__context-badge {
   border: 1px solid #8f8f8f;
   background: #e8e8e8;
@@ -1166,7 +1137,9 @@ function validateActiveLayer() {
 
 .workbench__status {
   margin-left: auto;
+  overflow: hidden;
   color: var(--qgis-muted);
+  text-overflow: ellipsis;
 }
 
 .workbench__status--success {
@@ -1179,6 +1152,31 @@ function validateActiveLayer() {
 
 .workbench__status--danger {
   color: var(--qgis-danger);
+}
+
+.workbench__status-crs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border-left: 1px solid #b6b6b6;
+  padding-left: 10px;
+}
+
+.workbench__status-crs-label {
+  color: var(--qgis-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workbench__status-crs-select {
+  width: 104px;
+  min-height: 22px;
+  border: 1px solid #9f9f9f;
+  background: #f5f5f5;
+  color: var(--qgis-text);
+  padding: 1px 4px;
+  font-size: 12px;
 }
 
 .workbench__dialog-backdrop {
