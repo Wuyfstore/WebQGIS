@@ -4,7 +4,7 @@
   "private": true,
   "description": "QGIS-like WebGIS MVP for PostGIS browsing, editing and vector tile publishing.",
   "scripts": {
-    "dev": "npm-run-all --parallel dev:*",
+    "dev": "node scripts/dev-clean-start.mjs",
     "dev:api": "npm --workspace apps/api run dev",
     "dev:web": "npm --workspace apps/web run dev",
     "build": "npm --workspaces run build",
