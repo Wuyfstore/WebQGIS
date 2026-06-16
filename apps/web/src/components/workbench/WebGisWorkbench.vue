@@ -10,14 +10,13 @@ import {
   Link,
   Location,
   Minus,
-  MoreFilled,
   Pointer,
   Rank,
   Refresh,
   RefreshLeft,
   Search
 } from "@element-plus/icons-vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, shallowRef, useTemplateRef, watch, type Component } from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import AttributeTablePanel from "./AttributeTablePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
@@ -25,7 +24,7 @@ import MapCanvas from "./MapCanvas.vue";
 import EditInspector from "./EditInspector.vue";
 import { useOpenLayersEditor } from "../../composables/useOpenLayersEditor";
 import { useWebGisWorkspace } from "../../composables/useWebGisWorkspace";
-import type { GeometryMode, LayerStylePatch } from "../../types/gis";
+import type { CrsDefinition, CustomCrsPayload, GeometryMode, LayerStylePatch } from "../../types/gis";
 import type { CoordinateAxisOrder, SelectionMode } from "../../composables/useOpenLayersEditor";
 import { getGeometryModes } from "../../utils/layer";
 
@@ -42,6 +41,20 @@ const isSelectionMenuOpen = shallowRef(false);
 const isCrsDialogOpen = shallowRef(false);
 const coordinatePrecision = shallowRef(5);
 const coordinateAxisOrder = shallowRef<CoordinateAxisOrder>("xy");
+const crsSearchQuery = shallowRef("");
+const isCrsSearching = shallowRef(false);
+const customCrsEditingId = shallowRef<string | null>(null);
+const customCrsForm = reactive<CustomCrsPayload>({
+  code: "",
+  name: "",
+  srid: 900001,
+  proj4text: "",
+  authName: "LOCAL",
+  wkt: "",
+  area: "",
+  scope: ""
+});
+let crsSearchRequestId = 0;
 
 const editor = useOpenLayersEditor({
   mapElement,
@@ -72,6 +85,8 @@ const {
   attributeTableQuery,
   visibleLayerIds,
   displayProjection,
+  crsCatalog,
+  customCrsCatalog,
   canRestoreVisibleLayerIds,
   busy,
   status,
@@ -119,42 +134,25 @@ const activeLayerEditStatus = computed(() => {
   return isEditingActiveLayer.value ? "编辑中" : "关闭";
 });
 const availableDrawModes = computed(() => getGeometryModes(activeLayer.value));
-const projectionOptions = ["EPSG:3857", "EPSG:4326", "EPSG:4490", "EPSG:4547"] as const;
-const crsCatalog = [
-  {
-    code: "EPSG:3857",
-    name: "WGS 84 / Pseudo-Mercator",
-    method: "Web Mercator",
-    scope: "常用 Web 底图显示坐标",
-    area: "World between 85.06°S and 85.06°N"
-  },
-  {
-    code: "EPSG:4326",
-    name: "WGS 84",
-    method: "Lat/long geographic",
-    scope: "全球经纬度数据源和交换坐标",
-    area: "World"
-  },
-  {
-    code: "EPSG:4490",
-    name: "CGCS2000",
-    method: "Geographic 2D",
-    scope: "中国大地坐标系统，经纬度显示",
-    area: "China"
-  },
-  {
-    code: "EPSG:4547",
-    name: "CGCS2000 / 3-degree Gauss-Kruger CM 105E",
-    method: "Transverse Mercator",
-    scope: "中国 3 度带平面坐标，需要注册投影参数后精确转换",
-    area: "China - 104.5E to 107.5E"
-  }
-] as const;
+const fallbackCrs = computed<CrsDefinition>(() => ({
+  id: `current-${displayProjection.value}`,
+  code: displayProjection.value,
+  authName: displayProjection.value.split(":")[0] ?? "EPSG",
+  authSrid: Number(displayProjection.value.split(":")[1] ?? 0),
+  srid: Number(displayProjection.value.split(":")[1] ?? 0),
+  name: displayProjection.value,
+  proj4text: "",
+  wkt: "",
+  area: "",
+  scope: "",
+  source: "fallback",
+  custom: false
+}));
 const selectionModeOptions = [
-  { mode: "click", label: "点击选择", description: "点击单个地图要素并回源读取属性和 geometry" },
-  { mode: "extent", label: "范围选择", description: "在地图上拖拽一个矩形范围，按范围选择要素" },
-  { mode: "customExtent", label: "自定义范围选择", description: "输入 xmin/ymin/xmax/ymax 后执行范围选择" }
-] satisfies { mode: SelectionMode; label: string; description: string }[];
+  { mode: "click", label: "点击选择", icon: Pointer },
+  { mode: "extent", label: "范围选择", icon: Crop },
+  { mode: "customExtent", label: "自定义范围选择", icon: EditPen }
+] satisfies { mode: SelectionMode; label: string; icon: Component }[];
 const coordinatePrecisionOptions = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 const menuItems = [
   "项目",
@@ -367,11 +365,19 @@ const activeSelectionModeLabel = computed(() => (
   selectionModeOptions.find((option) => option.mode === selectionMode.value)?.label ?? "点击选择"
 ));
 const selectedCrs = computed(() => (
-  crsCatalog.find((item) => item.code === displayProjection.value) ?? crsCatalog[0]
+  [...crsCatalog.value, ...customCrsCatalog.value].find((item) => item.code === displayProjection.value) ?? fallbackCrs.value
+));
+const visibleCrsCatalog = computed(() => (
+  crsCatalog.value.length > 0 ? crsCatalog.value : [selectedCrs.value]
 ));
 const coordinateSettingsLabel = computed(() => (
   `${coordinateAxisOrder.value === "xy" ? "X,Y" : "Y,X"} · ${coordinatePrecision.value} 位小数`
 ));
+const crsSourceLabels: Record<CrsDefinition["source"], string> = {
+  postgis: "数据库",
+  custom: "地方",
+  fallback: "内置"
+};
 
 onMounted(async () => {
   window.addEventListener("pointerdown", closeMenuOnOutsidePointer);
@@ -435,12 +441,12 @@ async function runMenuCommand(command: MenuCommand) {
   await command.action();
 }
 
-function toggleSelectionMenu() {
+function openSelectionMenu() {
   if (busy.value) {
     return;
   }
   openMenuLabel.value = null;
-  isSelectionMenuOpen.value = !isSelectionMenuOpen.value;
+  isSelectionMenuOpen.value = true;
 }
 
 function setSelectionMode(mode: SelectionMode) {
@@ -451,6 +457,10 @@ function setSelectionMode(mode: SelectionMode) {
 function openCrsDialog() {
   openMenuLabel.value = null;
   isCrsDialogOpen.value = true;
+  if (!crsSearchQuery.value) {
+    crsSearchQuery.value = displayProjection.value;
+  }
+  void searchCrsCatalog();
 }
 
 function closeCrsDialog() {
@@ -460,6 +470,74 @@ function closeCrsDialog() {
 function applyCrsDialog() {
   workspace.setStatus(`坐标显示已更新：${displayProjection.value}，${coordinateSettingsLabel.value}`, "success");
   closeCrsDialog();
+}
+
+async function searchCrsCatalog() {
+  const requestId = ++crsSearchRequestId;
+  isCrsSearching.value = true;
+  try {
+    await workspace.searchCrsCatalog(crsSearchQuery.value);
+  } finally {
+    if (requestId === crsSearchRequestId) {
+      isCrsSearching.value = false;
+    }
+  }
+}
+
+function handleCrsSearchInput(event: Event) {
+  crsSearchQuery.value = (event.target as HTMLInputElement).value;
+  void searchCrsCatalog();
+}
+
+function selectCrs(crs: CrsDefinition) {
+  workspace.setDisplayProjection(crs.code);
+}
+
+function resetCustomCrsForm() {
+  customCrsEditingId.value = null;
+  Object.assign(customCrsForm, {
+    code: "",
+    name: "",
+    srid: 900001,
+    proj4text: "",
+    authName: "LOCAL",
+    wkt: "",
+    area: "",
+    scope: ""
+  });
+}
+
+function editCustomCrs(crs: CrsDefinition) {
+  customCrsEditingId.value = crs.id;
+  Object.assign(customCrsForm, {
+    code: crs.code,
+    name: crs.name,
+    srid: crs.srid,
+    proj4text: crs.proj4text,
+    authName: crs.authName,
+    wkt: crs.wkt,
+    area: crs.area,
+    scope: crs.scope
+  });
+}
+
+async function submitCustomCrs() {
+  if (!customCrsForm.code.trim() || !customCrsForm.name.trim() || !customCrsForm.proj4text.trim()) {
+    workspace.setStatus("请填写地方坐标系编码、名称和 Proj4 参数", "warning");
+    return;
+  }
+  await workspace.saveCustomCrs({
+    ...customCrsForm,
+    srid: Number(customCrsForm.srid)
+  }, customCrsEditingId.value ?? undefined);
+  resetCustomCrsForm();
+}
+
+async function removeCustomCrs(crs: CrsDefinition) {
+  await workspace.deleteCustomCrs(crs.id);
+  if (customCrsEditingId.value === crs.id) {
+    resetCustomCrsForm();
+  }
 }
 
 function setCoordinatePrecision(event: Event) {
@@ -773,25 +851,19 @@ function validateActiveLayer() {
           :class="{ 'workbench__tool--active': item.active }"
           :disabled="item.disabled"
           type="button"
-          :title="item.label === '选择' ? activeSelectionModeLabel : item.title"
+          :title="item.label === '选择' ? `${activeSelectionModeLabel}；右键切换选择方式` : item.title"
           @click="item.label === '选择' ? setSelectionMode(selectionMode) : item.action()"
+          @contextmenu.prevent="item.label === '选择' ? openSelectionMenu() : undefined"
         >
           <component :is="item.icon" class="workbench__tool-icon" aria-hidden="true" />
-          <span class="workbench__tool-label">{{ item.label === "选择" ? activeSelectionModeLabel : item.label }}</span>
+          <span class="workbench__tool-label">{{ item.label }}</span>
         </button>
-        <button
-          v-if="item.label === '选择'"
-          class="workbench__tool-split focus-ring"
-          :class="{ 'workbench__tool-split--open': isSelectionMenuOpen }"
-          :disabled="item.disabled"
-          type="button"
-          aria-label="选择要素模式"
-          :aria-expanded="isSelectionMenuOpen"
-          @click.stop="toggleSelectionMenu"
+        <div
+          v-if="item.label === '选择' && isSelectionMenuOpen"
+          class="workbench__selection-menu"
+          role="menu"
+          aria-label="选择方式"
         >
-          <MoreFilled class="workbench__tool-split-icon" aria-hidden="true" />
-        </button>
-        <div v-if="item.label === '选择' && isSelectionMenuOpen" class="workbench__selection-menu" role="menu">
           <button
             v-for="option in selectionModeOptions"
             :key="option.mode"
@@ -802,8 +874,8 @@ function validateActiveLayer() {
             :aria-checked="selectionMode === option.mode"
             @click="setSelectionMode(option.mode)"
           >
+            <component :is="option.icon" class="workbench__selection-icon" aria-hidden="true" />
             <span class="workbench__selection-label">{{ option.label }}</span>
-            <span class="workbench__selection-description">{{ option.description }}</span>
           </button>
         </div>
       </div>
@@ -1272,15 +1344,6 @@ function validateActiveLayer() {
   align-items: stretch;
 }
 
-.workbench__tool-wrap--select .workbench__tool {
-  width: auto;
-  min-width: 78px;
-  grid-auto-flow: column;
-  grid-template-columns: 16px auto;
-  column-gap: 4px;
-  padding: 0 6px;
-}
-
 .workbench__tool {
   position: relative;
   display: grid;
@@ -1318,45 +1381,12 @@ function validateActiveLayer() {
   clip: rect(0 0 0 0);
 }
 
-.workbench__tool-wrap--select .workbench__tool-label {
-  position: static;
-  width: auto;
-  height: auto;
-  overflow: visible;
-  clip: auto;
-  font-size: 11px;
-  line-height: 1;
-}
-
-.workbench__tool-split {
-  display: grid;
-  width: 20px;
-  height: 26px;
-  place-items: center;
-  border: 1px solid #8d8d8d;
-  border-left: 0;
-  background: #efefef;
-  color: var(--qgis-text);
-  padding: 0;
-}
-
-.workbench__tool-split--open {
-  background: #d2d2d2;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
-}
-
-.workbench__tool-split-icon {
-  width: 13px;
-  height: 13px;
-  transform: rotate(90deg);
-}
-
 .workbench__selection-menu {
   position: absolute;
   top: calc(100% + 3px);
   left: 0;
   z-index: var(--qgis-z-menu);
-  width: 260px;
+  width: 184px;
   border: 1px solid #8d8d8d;
   background: #f7f7f7;
   box-shadow: 2px 4px 12px rgba(15, 23, 42, 0.24);
@@ -1364,14 +1394,15 @@ function validateActiveLayer() {
 }
 
 .workbench__selection-command {
-  display: grid;
+  display: flex;
   width: 100%;
-  min-height: 44px;
-  gap: 2px;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
   border: 0;
   background: transparent;
   color: var(--qgis-text);
-  padding: 6px 8px;
+  padding: 5px 8px;
   text-align: left;
 }
 
@@ -1380,14 +1411,14 @@ function validateActiveLayer() {
   background: var(--qgis-row-active);
 }
 
-.workbench__selection-label {
-  font-weight: 600;
+.workbench__selection-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
 }
 
-.workbench__selection-description {
-  color: var(--qgis-muted);
-  font-size: 11px;
-  line-height: 1.25;
+.workbench__selection-label {
+  font-weight: 600;
 }
 
 .workbench__tool--wide .workbench__tool-label,

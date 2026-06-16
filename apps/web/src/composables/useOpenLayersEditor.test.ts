@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { fromExtent } from "ol/geom/Polygon";
 import { transformExtent } from "ol/proj";
 import type { FeatureLike } from "ol/Feature";
 import {
   estimateScaleDenominator,
+  featureIntersectsSelectionGeometry,
   formatCoordinateLabel,
   formatScaleLabel,
   projectLayerExtent,
   projectionStatusLabel,
-  readVectorTileFeaturePk
+  readVectorTileFeaturePk,
+  selectionModeStatus
 } from "./useOpenLayersEditor";
 
 function createFeatureStub(id: string | number | undefined, propertyId: unknown = undefined): Pick<FeatureLike, "get" | "getId"> {
@@ -51,6 +54,22 @@ describe("readVectorTileFeaturePk", () => {
   it("describes display and source projection relationship", () => {
     expect(projectionStatusLabel("EPSG:4326")).toContain("WGS84 经纬度显示坐标");
     expect(projectionStatusLabel("EPSG:4547")).toContain("需注册投影参数后可精确转换");
+  });
+
+  it("describes each selection mode with the intended map gesture", () => {
+    expect(selectionModeStatus("click")).toContain("点击地图要素");
+    expect(selectionModeStatus("extent")).toContain("拖拽矩形范围");
+    expect(selectionModeStatus("customExtent")).toContain("自由绘制多边形范围");
+  });
+
+  it("checks whether a candidate feature intersects the selection geometry", () => {
+    const selection = fromExtent([0, 0, 10, 10]);
+    const inside = fromExtent([2, 2, 4, 4]);
+    const outside = fromExtent([12, 12, 14, 14]);
+
+    expect(featureIntersectsSelectionGeometry(inside, selection)).toBe(true);
+    expect(featureIntersectsSelectionGeometry(outside, selection)).toBe(false);
+    expect(featureIntersectsSelectionGeometry(undefined, selection)).toBe(false);
   });
 
   it("estimates a positive scale denominator from map resolution", () => {

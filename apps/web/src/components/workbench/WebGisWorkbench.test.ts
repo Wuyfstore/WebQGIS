@@ -558,8 +558,7 @@ describe("WebGisWorkbench", () => {
 
     const tools = wrapper.findAll(".workbench__tool");
     const editTool = tools.find((tool) => tool.attributes("title") === "开启当前图层编辑");
-    const selectTool = tools.find((tool) => tool.text().includes("点击选择"));
-    const selectionSplit = wrapper.find(".workbench__tool-split");
+    const selectTool = tools.find((tool) => tool.attributes("title")?.includes("右键切换选择方式"));
     const drawPointTool = tools.find((tool) => tool.attributes("title") === "绘制点要素");
     const drawPolygonTool = tools.find((tool) => tool.attributes("title") === "绘制面要素");
     const zoomTool = tools.find((tool) => tool.attributes("title") === "放大一级");
@@ -567,7 +566,7 @@ describe("WebGisWorkbench", () => {
 
     expect(editTool?.exists()).toBe(true);
     expect(selectTool?.exists()).toBe(true);
-    expect(selectionSplit.exists()).toBe(true);
+    expect(wrapper.find(".workbench__tool-split").exists()).toBe(false);
     expect(drawPointTool?.attributes("disabled")).toBeDefined();
     expect(drawPolygonTool?.attributes("disabled")).toBeDefined();
     expect(zoomTool?.exists()).toBe(true);
@@ -595,10 +594,16 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.text()).toContain("属性表单");
 
     await selectTool?.trigger("click");
-    await selectionSplit.trigger("click");
+    await selectTool?.trigger("contextmenu");
     await flushPromises();
     expect(wrapper.text()).toContain("范围选择");
+    expect(wrapper.findAll(".workbench__selection-icon")).toHaveLength(3);
+    expect(wrapper.find(".workbench__selection-description").exists()).toBe(false);
     await wrapper.findAll(".workbench__selection-command")[1].trigger("click");
+    await flushPromises();
+    await selectTool?.trigger("contextmenu");
+    await flushPromises();
+    await wrapper.findAll(".workbench__selection-command")[2].trigger("click");
     await flushPromises();
     await enabledDrawPolygonTool?.trigger("click");
     await zoomTool?.trigger("click");
@@ -606,6 +611,7 @@ describe("WebGisWorkbench", () => {
 
     expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("click");
     expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("extent");
+    expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("customExtent");
     expect(editorMock.startDrawing).toHaveBeenCalledWith("Polygon");
     expect(editorMock.zoomIn).toHaveBeenCalled();
     expect(editorMock.activateTool).not.toHaveBeenCalledWith("zoom");

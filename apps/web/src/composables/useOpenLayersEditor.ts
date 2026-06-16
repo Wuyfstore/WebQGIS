@@ -12,13 +12,16 @@ import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import VectorTileSource from "ol/source/VectorTile";
 import { Modify, Snap, Draw } from "ol/interaction";
+import DragBox from "ol/interaction/DragBox";
 import { unByKey } from "ol/Observable";
+import { intersects } from "ol/extent";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { fromLonLat, getPointResolution, transform, transformExtent } from "ol/proj";
 import type { Geometry } from "ol/geom";
 import type { FeatureLike } from "ol/Feature";
 import type { DrawEvent } from "ol/interaction/Draw";
 import type { EventsKey } from "ol/events";
+import type { Extent } from "ol/extent";
 import type { Pixel } from "ol/pixel";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
 
@@ -88,6 +91,27 @@ export function projectionStatusLabel(displayProjection: string, dataProjection 
   return `${displayProjection} 显示 / ${dataProjection} 数据源 · ${hint}`;
 }
 
+export function selectionModeStatus(mode: SelectionMode) {
+  if (mode === "click") {
+    return "点击选择已启用：点击地图要素读取原始 geometry";
+  }
+  if (mode === "extent") {
+    return "范围选择已启用：在地图上拖拽矩形范围选择要素";
+  }
+  return "自定义范围选择已启用：在地图上自由绘制多边形范围选择要素，双击结束";
+}
+
+type ExtentGeometry = {
+  getExtent: () => Extent;
+};
+
+export function featureIntersectsSelectionGeometry(featureGeometry: ExtentGeometry | undefined, selectionGeometry: Geometry) {
+  if (!featureGeometry) {
+    return false;
+  }
+  return intersects(featureGeometry.getExtent(), selectionGeometry.getExtent());
+}
+
 function toCoordinatePair(coordinate: number[]): [number, number] {
   return [coordinate[0] ?? 0, coordinate[1] ?? 0];
 }
@@ -133,11 +157,14 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   let modifyInteraction: Modify | null = null;
   let snapInteraction: Snap | null = null;
   let drawInteraction: Draw | null = null;
+  let selectionBoxInteraction: DragBox | null = null;
+  let selectionDrawInteraction: Draw | null = null;
   let mapClickKey: EventsKey | null = null;
   let pointerMoveKey: EventsKey | null = null;
   let viewChangeKey: EventsKey | null = null;
 
   const editSource = new VectorSource();
+  const selectionSketchSource = new VectorSource();
   const graticuleLayer = new Graticule({
     showLabels: true,
     wrapX: true,
@@ -159,6 +186,17 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       stroke: new Stroke({ color: "#f97316", width: 3 })
     })
   });
+  const selectionSketchLayer = new VectorLayer({
+    source: selectionSketchSource,
+    style: new Style({
+      fill: new Fill({ color: "rgba(96, 96, 96, 0.16)" }),
+      stroke: new Stroke({
+        color: "#5f5f5f",
+        width: 2,
+        lineDash: [6, 4]
+      })
+    })
+  });
 
   function initializeMap() {
     if (map.value || !options.mapElement.value) {
@@ -166,7 +204,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     map.value = new OlMap({
       target: options.mapElement.value,
-      layers: [graticuleLayer, editLayer],
+      layers: [graticuleLayer, selectionSketchLayer, editLayer],
       view: new View({
         center: fromLonLat([104.29, 35.5]),
         zoom: 4
@@ -189,6 +227,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   function disposeMap() {
     stopDrawing();
+    stopSelectionInteractions();
     if (mapClickKey) {
       unByKey(mapClickKey);
       mapClickKey = null;
@@ -263,12 +302,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       return;
     }
     if (activeTool.value === "select" && selectionMode.value !== "click") {
-      options.setStatus(
-        selectionMode.value === "extent"
-          ? "范围选择已启用：拖拽地图框定选择范围"
-          : "自定义范围选择已启用：请在范围面板输入坐标",
-        "neutral"
-      );
+      options.setStatus(selectionModeStatus(selectionMode.value), "neutral");
       return;
     }
     const activeTileLayer = options.activeLayer.value ? layerMap.get(options.activeLayer.value.id) : undefined;
@@ -333,6 +367,43 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
         options.setStatus(`已识别要素 ${pk}`, "success");
       }
     }
+  }
+
+  async function selectFeatureInGeometry(selectionGeometry: Geometry) {
+    const feature = findFeatureInSelectionGeometry(selectionGeometry);
+    if (!feature) {
+      options.setStatus("选择范围内没有可查询要素", "warning");
+      return;
+    }
+    await handleFeaturePick(feature);
+  }
+
+  function findFeatureInSelectionGeometry(selectionGeometry: Geometry) {
+    const activeTileLayer = options.activeLayer.value ? layerMap.get(options.activeLayer.value.id) : undefined;
+    return findFeatureInSelectionGeometryFromLayers(selectionGeometry, activeTileLayer ? [activeTileLayer] : [])
+      ?? findFeatureInSelectionGeometryFromLayers(
+        selectionGeometry,
+        [...layerMap.entries()]
+          .filter(([layerId]) => options.visibleLayerIds.value.has(layerId))
+          .map(([, layer]) => layer)
+      );
+  }
+
+  function findFeatureInSelectionGeometryFromLayers(
+    selectionGeometry: Geometry,
+    tileLayers: TileLayer<VectorTileSource>[]
+  ) {
+    const selectionExtent = selectionGeometry.getExtent();
+    for (const tileLayer of tileLayers) {
+      const candidates = tileLayer.getFeaturesInExtent(selectionExtent);
+      const matched = candidates.find((feature) => {
+        return featureIntersectsSelectionGeometry(feature.getGeometry(), selectionGeometry);
+      });
+      if (matched) {
+        return matched;
+      }
+    }
+    return undefined;
   }
 
   function loadEditableFeature(feature: GeoJsonFeature) {
@@ -417,14 +488,30 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     drawInteraction = null;
   }
 
+  function stopSelectionInteractions() {
+    if (selectionBoxInteraction && map.value) {
+      map.value.removeInteraction(selectionBoxInteraction);
+    }
+    if (selectionDrawInteraction && map.value) {
+      map.value.removeInteraction(selectionDrawInteraction);
+    }
+    selectionBoxInteraction = null;
+    selectionDrawInteraction = null;
+    selectionSketchSource.clear();
+  }
+
   function activateTool(tool: MapTool) {
     stopDrawing();
+    if (tool !== "select") {
+      stopSelectionInteractions();
+    }
     activeTool.value = tool;
     modifyInteraction?.setActive(tool === "node");
 
     if (tool === "select") {
       selectionMode.value = "click";
-      options.setStatus("点击选择已启用：点击地图要素读取原始 geometry", "neutral");
+      stopSelectionInteractions();
+      options.setStatus(selectionModeStatus("click"), "neutral");
     } else if (tool === "pan") {
       options.setStatus("平移工具已启用：拖拽地图移动视图", "neutral");
     } else if (tool === "identify") {
@@ -439,17 +526,59 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   function activateSelectionMode(mode: SelectionMode) {
     stopDrawing();
+    stopSelectionInteractions();
     selectionMode.value = mode;
     activeTool.value = "select";
     modifyInteraction?.setActive(false);
 
     if (mode === "click") {
-      options.setStatus("点击选择已启用：点击地图要素读取原始 geometry", "neutral");
+      options.setStatus(selectionModeStatus(mode), "neutral");
     } else if (mode === "extent") {
-      options.setStatus("范围选择已启用：在地图上拖拽框定范围", "neutral");
+      startExtentSelection();
+      options.setStatus(selectionModeStatus(mode), "neutral");
     } else {
-      options.setStatus("自定义范围选择已启用：输入范围坐标后执行选择", "neutral");
+      startCustomPolygonSelection();
+      options.setStatus(selectionModeStatus(mode), "neutral");
     }
+  }
+
+  function startExtentSelection() {
+    if (!map.value) {
+      options.setStatus("地图尚未初始化", "warning");
+      return;
+    }
+    selectionBoxInteraction = new DragBox({
+      className: "workbench-selection-box"
+    });
+    selectionBoxInteraction.on("boxend", () => {
+      const geometry = selectionBoxInteraction?.getGeometry();
+      if (geometry) {
+        void selectFeatureInGeometry(geometry);
+      }
+    });
+    map.value.addInteraction(selectionBoxInteraction);
+  }
+
+  function startCustomPolygonSelection() {
+    if (!map.value) {
+      options.setStatus("地图尚未初始化", "warning");
+      return;
+    }
+    selectionDrawInteraction = new Draw({
+      source: selectionSketchSource,
+      type: "Polygon",
+      stopClick: true
+    });
+    selectionDrawInteraction.on("drawend", (event: DrawEvent) => {
+      const geometry = event.feature.getGeometry();
+      window.setTimeout(() => {
+        selectionSketchSource.clear();
+      }, 0);
+      if (geometry) {
+        void selectFeatureInGeometry(geometry);
+      }
+    });
+    map.value.addInteraction(selectionDrawInteraction);
   }
 
   function zoomIn() {
