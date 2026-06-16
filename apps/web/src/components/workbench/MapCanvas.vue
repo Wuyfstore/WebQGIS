@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, useTemplateRef } from "vue";
+import { computed, onMounted, shallowRef, useTemplateRef } from "vue";
 import { getGeometryModes } from "../../utils/layer";
 import type { GeometryMode, LayerRegistration } from "../../types/gis";
 
@@ -22,10 +22,40 @@ const emit = defineEmits<{
   delete: [];
   clear: [];
   toggleEdit: [];
+  layerDrop: [layerId: string];
 }>();
 
 const mapRoot = useTemplateRef<HTMLDivElement>("mapRoot");
+const isLayerDragOver = shallowRef(false);
 const geometryModes = computed(() => getGeometryModes(props.activeLayer));
+
+function readDroppedLayerId(event: DragEvent) {
+  return event.dataTransfer?.getData("application/x-webqgis-layer-id")
+    || event.dataTransfer?.getData("text/plain")
+    || "";
+}
+
+function handleLayerDragOver(event: DragEvent) {
+  if (!readDroppedLayerId(event)) {
+    return;
+  }
+  event.preventDefault();
+  isLayerDragOver.value = true;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+}
+
+function handleLayerDrop(event: DragEvent) {
+  const layerId = readDroppedLayerId(event);
+  if (!layerId) {
+    isLayerDragOver.value = false;
+    return;
+  }
+  event.preventDefault();
+  isLayerDragOver.value = false;
+  emit("layerDrop", layerId);
+}
 
 onMounted(() => {
   if (mapRoot.value) {
@@ -36,7 +66,19 @@ onMounted(() => {
 
 <template>
   <section class="map-canvas">
-    <div ref="mapRoot" class="map-canvas__map" :style="mapStyle" aria-label="地图画布"></div>
+    <div
+      ref="mapRoot"
+      class="map-canvas__map"
+      :class="{ 'map-canvas__map--drop-target': isLayerDragOver }"
+      :style="mapStyle"
+      aria-label="地图画布"
+      @dragenter="handleLayerDragOver"
+      @dragover="handleLayerDragOver"
+      @dragleave="isLayerDragOver = false"
+      @drop="handleLayerDrop"
+    >
+      <div v-if="isLayerDragOver" class="map-canvas__drop-hint">释放以添加空间图层</div>
+    </div>
 
     <div class="map-canvas__toolbar" aria-label="编辑工具栏">
       <div class="map-canvas__toolbar-title">
@@ -109,6 +151,7 @@ onMounted(() => {
 }
 
 .map-canvas__map {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: calc(100vh - 134px);
@@ -116,6 +159,25 @@ onMounted(() => {
     linear-gradient(rgba(215, 208, 185, var(--map-grid-opacity, 0.42)) 1px, transparent 1px),
     linear-gradient(90deg, rgba(215, 208, 185, var(--map-grid-opacity, 0.42)) 1px, transparent 1px);
   background-size: var(--map-grid-size, 64px) var(--map-grid-size, 64px);
+}
+
+.map-canvas__map--drop-target {
+  outline: 2px solid #777777;
+  outline-offset: -8px;
+  background-color: rgba(230, 230, 230, 0.72);
+}
+
+.map-canvas__drop-hint {
+  position: absolute;
+  inset: 18px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #777777;
+  background: rgba(246, 246, 246, 0.68);
+  color: var(--qgis-text);
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .map-canvas__map :deep(.ol-zoom),

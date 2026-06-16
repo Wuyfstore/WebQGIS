@@ -28,7 +28,8 @@ export function useWebGisWorkspace() {
   useTitle("WebQGIS 工作台");
 
   const datasources = shallowRef<Datasource[]>([]);
-  const layers = shallowRef<LayerRegistration[]>([]);
+  const availableLayers = shallowRef<LayerRegistration[]>([]);
+  const loadedLayerIds = shallowRef(new Set<string>());
   const activeLayerId = shallowRef("");
   const visibleLayerIds = shallowRef(new Set<string>());
   const previousVisibleLayerIds = shallowRef<Set<string> | null>(null);
@@ -50,6 +51,7 @@ export function useWebGisWorkspace() {
   const attributeTableLayerId = shallowRef<string | null>(null);
   const datasourceForm = reactive(defaultDatasourceForm());
 
+  const layers = computed(() => availableLayers.value.filter((layer) => loadedLayerIds.value.has(layer.id)));
   const activeLayer = computed(() => layers.value.find((layer) => layer.id === activeLayerId.value));
   const editableFields = computed(() => getEditableFields(activeLayer.value));
   const selectedLayerStatus = computed(() => getLayerStatus(activeLayer.value));
@@ -58,7 +60,7 @@ export function useWebGisWorkspace() {
     layers.value.find((layer) => layer.id === attributeTableLayerId.value) ?? null
   ));
   const canRestoreVisibleLayerIds = computed(() => Boolean(previousVisibleLayerIds.value?.size));
-  const registeredLayerCount = computed(() => layers.value.length);
+  const registeredLayerCount = computed(() => availableLayers.value.length);
   const editableLayerCount = computed(() => layers.value.filter((layer) => layer.editable).length);
 
   function setStatus(text: string, tone: StatusMessage["tone"] = "neutral") {
@@ -67,6 +69,22 @@ export function useWebGisWorkspace() {
 
   function replaceVisibleLayerIds(next: Set<string>) {
     visibleLayerIds.value = new Set(next);
+  }
+
+  function replaceLoadedLayerIds(next: Set<string>) {
+    loadedLayerIds.value = new Set(next);
+  }
+
+  function reconcileLoadedLayers(nextAvailableLayers: LayerRegistration[]) {
+    const availableIds = new Set(nextAvailableLayers.map((layer) => layer.id));
+    const nextLoaded = new Set([...loadedLayerIds.value].filter((layerId) => availableIds.has(layerId)));
+    const nextVisible = new Set([...visibleLayerIds.value].filter((layerId) => nextLoaded.has(layerId)));
+    replaceLoadedLayerIds(nextLoaded);
+    replaceVisibleLayerIds(nextVisible);
+    if (activeLayerId.value && !nextLoaded.has(activeLayerId.value)) {
+      activeLayerId.value = nextLoaded.values().next().value ?? "";
+      clearDraftState();
+    }
   }
 
   function rememberVisibleLayerIds() {
@@ -103,21 +121,14 @@ export function useWebGisWorkspace() {
 
   async function refreshAll() {
     await withBusy(async () => {
-      const [nextDatasources, nextLayers] = await Promise.all([
+      const [nextDatasources, nextAvailableLayers] = await Promise.all([
         apiGet<Datasource[]>("/api/datasources"),
         apiGet<LayerRegistration[]>("/api/layers")
       ]);
       datasources.value = nextDatasources;
-      layers.value = nextLayers;
-      const nextVisible = new Set(visibleLayerIds.value);
-      for (const layer of nextLayers) {
-        nextVisible.add(layer.id);
-      }
-      replaceVisibleLayerIds(nextVisible);
-      if (!activeLayerId.value && nextLayers.length > 0) {
-        activeLayerId.value = nextLayers[0].id;
-      }
-      setStatus("已刷新数据源和图层", "success");
+      availableLayers.value = nextAvailableLayers;
+      reconcileLoadedLayers(nextAvailableLayers);
+      setStatus("已刷新数据源和空间表目录", "success");
     });
   }
 
@@ -135,15 +146,31 @@ export function useWebGisWorkspace() {
         `/api/datasources/${datasourceId}/scan`,
         "POST"
       );
-      layers.value = await apiGet<LayerRegistration[]>("/api/layers");
-      const nextVisible = new Set(visibleLayerIds.value);
-      for (const layer of result.layers) {
-        nextVisible.add(layer.id);
-      }
-      replaceVisibleLayerIds(nextVisible);
-      activeLayerId.value = result.layers[0]?.id ?? activeLayerId.value;
-      setStatus(`扫描完成：${result.layers.length} 个空间图层`, "success");
+      const nextAvailableLayers = await apiGet<LayerRegistration[]>("/api/layers");
+      availableLayers.value = nextAvailableLayers;
+      reconcileLoadedLayers(nextAvailableLayers);
+      setStatus(`扫描完成：${result.layers.length} 个空间表，可拖入地图添加图层`, "success");
     });
+  }
+
+  function loadLayer(layerId: string) {
+    const layer = availableLayers.value.find((item) => item.id === layerId);
+    if (!layer) {
+      setStatus("未找到要加载的空间表", "warning");
+      return undefined;
+    }
+    const wasLoaded = loadedLayerIds.value.has(layer.id);
+    replaceLoadedLayerIds(new Set([...loadedLayerIds.value, layer.id]));
+    replaceVisibleLayerIds(new Set([...visibleLayerIds.value, layer.id]));
+    activeLayerId.value = layer.id;
+    clearDraftState();
+    setStatus(
+      wasLoaded
+        ? `已激活图层：${layer.schema}.${layer.table}`
+        : `已添加图层：${layer.schema}.${layer.table}`,
+      "success"
+    );
+    return layer;
   }
 
   function setActiveLayer(layerId: string) {
@@ -325,13 +352,15 @@ export function useWebGisWorkspace() {
   async function updateLayerStyle(layerId: string, patch: LayerStylePatch) {
     await withBusy(async () => {
       const updated = await apiSend<LayerRegistration>(`/api/layers/${layerId}/style`, "PUT", patch);
-      layers.value = layers.value.map((layer) => layer.id === updated.id ? updated : layer);
+      availableLayers.value = availableLayers.value.map((layer) => layer.id === updated.id ? updated : layer);
       setStatus(`已更新图层样式：${updated.schema}.${updated.table}`, "success");
     });
   }
 
   return {
     datasources,
+    availableLayers,
+    loadedLayerIds,
     layers,
     activeLayerId,
     activeLayer,
@@ -356,6 +385,7 @@ export function useWebGisWorkspace() {
     refreshAll,
     saveDatasource,
     scanDatasource,
+    loadLayer,
     setDisplayProjection,
     setActiveLayer,
     toggleLayer,

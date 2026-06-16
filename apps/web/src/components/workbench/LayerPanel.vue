@@ -18,6 +18,7 @@ const emit = defineEmits<{
   zoomToLayer: [layerId: string];
   openAttributeTable: [layerId: string];
   openStyleEditor: [layerId: string];
+  layerDrop: [layerId: string];
 }>();
 
 const contextMenu = shallowRef({
@@ -31,6 +32,35 @@ const contextMenuStyle = computed(() => ({
   top: `${contextMenu.value.y}px`
 }));
 const contextLayer = computed(() => props.layers.find((layer) => layer.id === contextMenu.value.layerId));
+const isLayerDragOver = shallowRef(false);
+
+function readDroppedLayerId(event: DragEvent) {
+  return event.dataTransfer?.getData("application/x-webqgis-layer-id")
+    || event.dataTransfer?.getData("text/plain")
+    || "";
+}
+
+function handleLayerDragOver(event: DragEvent) {
+  if (!readDroppedLayerId(event)) {
+    return;
+  }
+  event.preventDefault();
+  isLayerDragOver.value = true;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+}
+
+function handleLayerDrop(event: DragEvent) {
+  const layerId = readDroppedLayerId(event);
+  if (!layerId) {
+    isLayerDragOver.value = false;
+    return;
+  }
+  event.preventDefault();
+  isLayerDragOver.value = false;
+  emit("layerDrop", layerId);
+}
 
 function openLayerContextMenu(event: MouseEvent, layerId: string) {
   event.preventDefault();
@@ -72,14 +102,21 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="layer-panel">
-    <section class="layer-panel__dock workbench-panel">
+    <section
+      class="layer-panel__dock workbench-panel"
+      :class="{ 'layer-panel__dock--drop-target': isLayerDragOver }"
+      @dragenter="handleLayerDragOver"
+      @dragover="handleLayerDragOver"
+      @dragleave="isLayerDragOver = false"
+      @drop="handleLayerDrop"
+    >
       <header class="layer-panel__header">
         <h2 class="layer-panel__title">图层</h2>
         <span class="layer-panel__summary">{{ editableLayerCount }} 可编辑</span>
       </header>
 
       <div v-if="layers.length === 0" class="layer-panel__empty">
-        暂无图层
+        从浏览器拖入空间表以添加图层
       </div>
 
       <div v-else class="layer-panel__list" aria-label="空间图层">
@@ -150,6 +187,12 @@ onBeforeUnmount(() => {
 
 .layer-panel__dock {
   border-width: 1px 0 0;
+}
+
+.layer-panel__dock--drop-target {
+  outline: 2px solid #777777;
+  outline-offset: -4px;
+  background: #eeeeee;
 }
 
 .layer-panel__header {

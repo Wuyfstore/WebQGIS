@@ -5,7 +5,20 @@ import WebGisWorkbench from "./WebGisWorkbench.vue";
 import { apiGet, apiSend } from "../../api";
 import type { Datasource, LayerRegistration } from "../../types/gis";
 
-const sampleDatasources: Datasource[] = [];
+const sampleDatasources: Datasource[] = [
+  {
+    id: "local",
+    name: "Docker PostGIS Test",
+    host: "127.0.0.1",
+    port: 5432,
+    database: "test",
+    user: "postgres",
+    ssl: false,
+    createdAt: "2026-06-12T00:00:00.000Z",
+    updatedAt: "2026-06-12T00:00:00.000Z",
+    hasPassword: true
+  }
+];
 const sampleLayers: LayerRegistration[] = [
   {
     id: "province",
@@ -179,6 +192,9 @@ vi.mock("../../api", () => ({
     throw new Error(`Unhandled apiGet ${path}`);
   }),
   apiSend: vi.fn(async (path: string, method: string, payload?: unknown) => {
+    if (path === "/api/datasources/local/scan" && method === "POST") {
+      return { layers: sampleLayers };
+    }
     if (path === "/api/layers/city/style" && method === "PUT") {
       return {
         ...sampleLayers[1],
@@ -191,6 +207,49 @@ vi.mock("../../api", () => ({
     throw new Error(`Unhandled apiSend ${method} ${path}`);
   })
 }));
+
+async function expandDatasource(wrapper: ReturnType<typeof mount<typeof WebGisWorkbench>>) {
+  if (wrapper.findAll(".datasource-panel__tree-node--layer").length > 0) {
+    return;
+  }
+  const sourceButton = wrapper.findAll(".datasource-panel__tree-node--source")
+    .find((button) => button.text().includes("Docker PostGIS Test"));
+  expect(sourceButton?.exists()).toBe(true);
+  await sourceButton?.trigger("click");
+  await flushPromises();
+}
+
+async function loadLayerByDoubleClick(
+  wrapper: ReturnType<typeof mount<typeof WebGisWorkbench>>,
+  layerName = "public.china_2025_city"
+) {
+  await expandDatasource(wrapper);
+  const layerButton = wrapper.findAll(".datasource-panel__tree-node--layer")
+    .find((button) => button.text().includes(layerName));
+  expect(layerButton?.exists()).toBe(true);
+  await layerButton?.trigger("dblclick");
+  await flushPromises();
+}
+
+function createLayerDragEvent(type: string, layerId = "city") {
+  const data = new Map<string, string>([
+    ["application/x-webqgis-layer-id", layerId],
+    ["text/plain", layerId]
+  ]);
+  const event = new Event(type, {
+    bubbles: true,
+    cancelable: true
+  }) as DragEvent;
+  Object.defineProperty(event, "dataTransfer", {
+    value: {
+      dropEffect: "",
+      effectAllowed: "",
+      getData: (format: string) => data.get(format) ?? "",
+      setData: (format: string, value: string) => data.set(format, value)
+    }
+  });
+  return event;
+}
 
 describe("WebGisWorkbench", () => {
   beforeEach(() => {
@@ -239,15 +298,16 @@ describe("WebGisWorkbench", () => {
     const wrapper = mount(WebGisWorkbench, {
       attachTo: document.body
     });
+    await flushPromises();
 
-    expect(wrapper.text()).toContain("暂无连接。右键 PostgreSQL 新建 PostGIS 连接。");
+    expect(wrapper.text()).toContain("Docker PostGIS Test");
     await wrapper.find(".datasource-panel__tree-node--root").trigger("click");
 
     expect(document.body.textContent).not.toContain("创建新的 PostGIS 连接");
-    expect(wrapper.text()).not.toContain("暂无连接。右键 PostgreSQL 新建 PostGIS 连接。");
+    expect(wrapper.text()).not.toContain("Docker PostGIS Test");
 
     await wrapper.find(".datasource-panel__tree-node--root").trigger("click");
-    expect(wrapper.text()).toContain("暂无连接。右键 PostgreSQL 新建 PostGIS 连接。");
+    expect(wrapper.text()).toContain("Docker PostGIS Test");
 
     wrapper.unmount();
     document.body.innerHTML = "";
@@ -326,9 +386,66 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.find("svg.workbench__tool-icon").exists()).toBe(true);
   });
 
+  it("keeps scanned spatial tables in the browser until the user loads them", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Docker PostGIS Test");
+    expect(wrapper.text()).toContain("从浏览器拖入空间表以添加图层");
+    expect(wrapper.text()).toContain("活动图层:未选择");
+
+    await expandDatasource(wrapper);
+
+    expect(wrapper.text()).toContain("public.china_2025_city");
+    expect(wrapper.findAll(".layer-panel__row")).toHaveLength(0);
+
+    await wrapper.findAll(".datasource-panel__tree-node--layer")
+      .find((button) => button.text().includes("public.china_2025_city"))
+      ?.trigger("dblclick");
+    await flushPromises();
+
+    expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
+    expect(wrapper.text()).toContain("已添加图层：public.china_2025_city");
+    expect(wrapper.text()).toContain("活动图层:public.china_2025_city");
+    expect(wrapper.text()).toContain("编辑:关闭");
+    expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
+
+    await wrapper.findAll(".datasource-panel__tree-node--layer")
+      .find((button) => button.text().includes("public.china_2025_city"))
+      ?.trigger("dblclick");
+    await flushPromises();
+
+    expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
+    expect(wrapper.text()).toContain("已激活图层：public.china_2025_city");
+  });
+
+  it("loads spatial tables when dropped on the map canvas or layer panel", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await expandDatasource(wrapper);
+
+    wrapper.find(".map-canvas__map").element.dispatchEvent(createLayerDragEvent("dragover", "city"));
+    wrapper.find(".map-canvas__map").element.dispatchEvent(createLayerDragEvent("drop", "city"));
+    await flushPromises();
+
+    expect(wrapper.findAll(".layer-panel__row")).toHaveLength(1);
+    expect(wrapper.text()).toContain("public.china_2025_city");
+    expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("city");
+
+    wrapper.find(".layer-panel__dock").element.dispatchEvent(createLayerDragEvent("dragover", "province"));
+    wrapper.find(".layer-panel__dock").element.dispatchEvent(createLayerDragEvent("drop", "province"));
+    await flushPromises();
+
+    expect(wrapper.findAll(".layer-panel__row")).toHaveLength(2);
+    expect(wrapper.text()).toContain("public.china_2025_province");
+    expect(editorMock.zoomToLayerExtent).toHaveBeenCalledWith("province");
+  });
+
   it("wires toolbar tools to existing map and workspace actions", async () => {
     const wrapper = mount(WebGisWorkbench);
     await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper);
 
     const tools = wrapper.findAll(".workbench__tool");
     const editTool = tools.find((tool) => tool.attributes("title") === "开启当前图层编辑");
@@ -376,7 +493,7 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.activateTool).not.toHaveBeenCalledWith("zoom");
     expect(editorMock.toggleSnap).toHaveBeenCalled();
 
-    await wrapper.findAll(".layer-panel__select")[1].trigger("click");
+    await wrapper.findAll(".layer-panel__select")[0].trigger("click");
     await flushPromises();
 
     expect(wrapper.text()).toContain("已切换图层，编辑模式已关闭");
@@ -398,6 +515,8 @@ describe("WebGisWorkbench", () => {
   it("can show only the active layer and then show all layers from the layer menu", async () => {
     const wrapper = mount(WebGisWorkbench);
     await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_city");
 
     await wrapper.findAll(".workbench__menu-item")
       .find((item) => item.text() === "图层")
@@ -407,8 +526,8 @@ describe("WebGisWorkbench", () => {
       ?.trigger("click");
 
     let visibilityInputs = wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
-    expect(visibilityInputs[0].element.checked).toBe(true);
-    expect(visibilityInputs[1].element.checked).toBe(false);
+    expect(visibilityInputs[0].element.checked).toBe(false);
+    expect(visibilityInputs[1].element.checked).toBe(true);
 
     await wrapper.findAll(".workbench__menu-item")
       .find((item) => item.text() === "图层")
@@ -428,6 +547,8 @@ describe("WebGisWorkbench", () => {
       attachTo: document.body
     });
     await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_city");
 
     const visibilityInputs = () => wrapper.findAll<HTMLInputElement>(".layer-panel__visibility input");
     await visibilityInputs()[1].setValue(false);
@@ -466,6 +587,8 @@ describe("WebGisWorkbench", () => {
       attachTo: document.body
     });
     await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_city");
 
     await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
       clientX: 160,

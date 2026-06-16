@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import { Connection, FolderOpened, Plus, Refresh, Setting } from "@element-plus/icons-vue";
-import type { Datasource, DatasourceForm } from "../../types/gis";
+import type { Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   datasources: Datasource[];
+  availableLayers: LayerRegistration[];
+  loadedLayerIds: Set<string>;
   busy: boolean;
   connectionDialogRequestKey: number;
-}>();
+}>(), {
+  availableLayers: () => [],
+  loadedLayerIds: () => new Set<string>()
+});
 
 const form = defineModel<DatasourceForm>("form", { required: true });
 
 const emit = defineEmits<{
   save: [];
   scan: [datasourceId: string];
+  loadLayer: [layerId: string];
 }>();
 
 const isPostgresExpanded = shallowRef(true);
@@ -29,6 +35,16 @@ const contextMenuStyle = computed(() => ({
 }));
 const datasourceCountLabel = computed(() => `${props.datasources.length} 个连接`);
 const postgresDisclosure = computed(() => (isPostgresExpanded.value ? "▾" : "▸"));
+const expandedDatasourceIds = shallowRef(new Set<string>());
+const scannedDatasourceIds = shallowRef(new Set<string>());
+
+function datasourceDisclosure(datasourceId: string) {
+  return expandedDatasourceIds.value.has(datasourceId) ? "▾" : "▸";
+}
+
+function datasourceLayers(datasourceId: string) {
+  return props.availableLayers.filter((layer) => layer.datasourceId === datasourceId);
+}
 
 function openContextMenu(event: MouseEvent) {
   event.preventDefault();
@@ -56,6 +72,20 @@ function togglePostgresNode() {
   isPostgresExpanded.value = !isPostgresExpanded.value;
 }
 
+function toggleDatasourceNode(datasourceId: string) {
+  const next = new Set(expandedDatasourceIds.value);
+  if (next.has(datasourceId)) {
+    next.delete(datasourceId);
+  } else {
+    next.add(datasourceId);
+    if (!scannedDatasourceIds.value.has(datasourceId)) {
+      scannedDatasourceIds.value = new Set([...scannedDatasourceIds.value, datasourceId]);
+      emit("scan", datasourceId);
+    }
+  }
+  expandedDatasourceIds.value = next;
+}
+
 function closeConnectionDialog() {
   isConnectionDialogOpen.value = false;
 }
@@ -68,6 +98,14 @@ function refreshFirstDatasource() {
   const datasource = props.datasources[0];
   if (datasource) {
     emit("scan", datasource.id);
+  }
+}
+
+function startLayerDrag(event: DragEvent, layerId: string) {
+  event.dataTransfer?.setData("application/x-webqgis-layer-id", layerId);
+  event.dataTransfer?.setData("text/plain", layerId);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "copy";
   }
 }
 
@@ -106,18 +144,47 @@ watch(
         <span class="datasource-panel__root-meta">{{ datasourceCountLabel }}</span>
       </button>
       <template v-if="isPostgresExpanded">
-        <button
+        <div
           v-for="datasource in datasources"
           :key="datasource.id"
-          class="datasource-panel__tree-node datasource-panel__tree-node--source focus-ring"
-          :disabled="busy"
-          type="button"
-          @click="emit('scan', datasource.id)"
+          class="datasource-panel__source-group"
         >
-          <Connection class="datasource-panel__node-icon" />
-          <span class="datasource-panel__source-name">▾ {{ datasource.name }}</span>
-          <span class="datasource-panel__source-meta">{{ datasource.host }} / {{ datasource.database }}</span>
-        </button>
+          <button
+            class="datasource-panel__tree-node datasource-panel__tree-node--source focus-ring"
+            :disabled="busy"
+            type="button"
+            @click="toggleDatasourceNode(datasource.id)"
+          >
+            <Connection class="datasource-panel__node-icon" />
+            <span class="datasource-panel__source-name">{{ datasourceDisclosure(datasource.id) }} {{ datasource.name }}</span>
+            <span class="datasource-panel__source-meta">{{ datasource.host }} / {{ datasource.database }}</span>
+          </button>
+
+          <div v-if="expandedDatasourceIds.has(datasource.id)" class="datasource-panel__layer-list">
+            <button
+              v-for="layer in datasourceLayers(datasource.id)"
+              :key="layer.id"
+              class="datasource-panel__tree-node datasource-panel__tree-node--layer focus-ring"
+              :class="{ 'datasource-panel__tree-node--loaded': loadedLayerIds.has(layer.id) }"
+              :draggable="!busy"
+              type="button"
+              @dblclick="emit('loadLayer', layer.id)"
+              @dragstart="startLayerDrag($event, layer.id)"
+            >
+              <span class="datasource-panel__layer-icon" aria-hidden="true"></span>
+              <span class="datasource-panel__layer-main">
+                <span class="datasource-panel__layer-name">{{ layer.schema }}.{{ layer.table }}</span>
+                <span class="datasource-panel__layer-meta">{{ layer.geometryType }} · SRID {{ layer.srid ?? "未知" }}</span>
+              </span>
+              <span class="datasource-panel__layer-tag" :class="{ 'datasource-panel__layer-tag--readonly': !layer.editable }">
+                {{ loadedLayerIds.has(layer.id) ? "已加载" : layer.editable ? "可编辑" : "只读" }}
+              </span>
+            </button>
+            <div v-if="datasourceLayers(datasource.id).length === 0" class="datasource-panel__tree-empty">
+              暂无空间表，点击连接会扫描数据库。
+            </div>
+          </div>
+        </div>
         <div v-if="datasources.length === 0" class="datasource-panel__tree-empty">
           暂无连接。右键 PostgreSQL 新建 PostGIS 连接。
         </div>
@@ -323,19 +390,55 @@ watch(
   font-weight: 600;
 }
 
+.datasource-panel__source-group {
+  min-width: 0;
+}
+
+.datasource-panel__layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0 4px;
+}
+
+.datasource-panel__tree-node--layer {
+  grid-template-columns: 18px minmax(0, 1fr) 56px;
+  min-height: 30px;
+  padding-left: 42px;
+  cursor: grab;
+}
+
+.datasource-panel__tree-node--layer:active {
+  cursor: grabbing;
+}
+
+.datasource-panel__tree-node--loaded {
+  background: #dedede;
+}
+
 .datasource-panel__node-icon {
   width: 14px;
   height: 14px;
   color: #6f8a54;
 }
 
-.datasource-panel__tree-node--source:hover {
+.datasource-panel__tree-node--source:hover,
+.datasource-panel__tree-node--layer:hover {
   background: var(--qgis-row-active);
+}
+
+.datasource-panel__layer-icon {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #7a7a7a;
+  background: #d7e5cf;
 }
 
 .datasource-panel__source-name,
 .datasource-panel__source-meta,
-.datasource-panel__root-meta {
+.datasource-panel__root-meta,
+.datasource-panel__layer-name,
+.datasource-panel__layer-meta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -354,6 +457,32 @@ watch(
   color: var(--qgis-muted);
   font-size: 11px;
   font-weight: 400;
+}
+
+.datasource-panel__layer-main {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.datasource-panel__layer-name {
+  display: block;
+  font-size: 12px;
+}
+
+.datasource-panel__layer-meta {
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.datasource-panel__layer-tag {
+  color: var(--qgis-muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.datasource-panel__layer-tag--readonly {
+  color: var(--qgis-warn);
 }
 
 .datasource-panel__tree-empty {

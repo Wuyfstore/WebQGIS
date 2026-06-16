@@ -50,6 +50,8 @@ const editor = useOpenLayersEditor({
 
 const {
   datasources,
+  availableLayers,
+  loadedLayerIds,
   layers,
   activeLayerId,
   activeLayer,
@@ -458,6 +460,15 @@ async function scanFirstDatasource() {
   await workspace.scanDatasource(datasource.id);
 }
 
+async function loadLayerToMap(layerId: string) {
+  const layer = workspace.loadLayer(layerId);
+  if (!layer) {
+    return;
+  }
+  await nextTick();
+  editor.zoomToLayerExtent(layer.id);
+}
+
 function toggleActiveLayerVisibility() {
   const layer = activeLayer.value;
   if (!layer) {
@@ -613,11 +624,14 @@ function validateActiveLayer() {
       <aside class="workbench__left-dock" aria-label="浏览器与图层">
         <DatasourcePanel
           :datasources="datasources"
+          :available-layers="availableLayers"
+          :loaded-layer-ids="loadedLayerIds"
           v-model:form="datasourceForm"
           :busy="busy"
           :connection-dialog-request-key="datasourceDialogRequestKey"
           @save="workspace.saveDatasource"
           @scan="workspace.scanDatasource"
+          @load-layer="loadLayerToMap"
         />
 
         <LayerPanel
@@ -633,6 +647,7 @@ function validateActiveLayer() {
           @zoom-to-layer="zoomToLayer"
           @open-attribute-table="openAttributeTable"
           @open-style-editor="openStyleEditor"
+          @layer-drop="loadLayerToMap"
         />
       </aside>
 
@@ -651,6 +666,7 @@ function validateActiveLayer() {
         @delete="handleDeleteFeature"
         @clear="handleClearDraft"
         @toggle-edit="toggleEditingActiveLayer"
+        @layer-drop="loadLayerToMap"
       />
 
       <EditInspector
