@@ -138,10 +138,6 @@ const editorMock = {
   isDrawing: shallowRef(false),
   isSnapEnabled: shallowRef(true),
   isDeleteDialogOpen: shallowRef(false),
-  mapCssVars: shallowRef({
-    "--map-grid-size": "64px",
-    "--map-grid-opacity": "0.42"
-  }),
   coordinateLabel: shallowRef("坐标 104.06480, 30.65720 / EPSG:4326"),
   scaleLabel: shallowRef("比例尺 1:2,500"),
   projectionLabel: shallowRef("EPSG:4326 显示 / EPSG:4326 数据源 · WGS84 经纬度显示坐标"),
@@ -212,6 +208,19 @@ vi.mock("../../api", () => ({
           ...sampleLayers[1].style,
           ...(payload as object)
         }
+      };
+    }
+    if (path === "/api/layers/city/query" && method === "POST") {
+      return {
+        columns: ["id", "name"],
+        rows: [{ id: 1024, name: "成都市" }],
+        limit: (payload as { limit: number }).limit
+      };
+    }
+    if (path === "/api/layers/city/calculate" && method === "POST") {
+      return {
+        targetField: (payload as { targetField: string }).targetField,
+        affectedRows: 2
       };
     }
     throw new Error(`Unhandled apiSend ${method} ${path}`);
@@ -301,9 +310,23 @@ function contextMenuItem(label: string) {
     .find((button) => button.textContent?.trim() === label);
 }
 
+function setNativeInputValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+  const prototype = element instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : element instanceof HTMLSelectElement
+      ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
+}
+
 describe("WebGisWorkbench", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn(async () => undefined)
+      }
+    });
     editorMock.drawMode.value = "Point";
     editorMock.activeTool.value = "select";
     editorMock.isDrawing.value = false;
@@ -658,6 +681,43 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.text()).toContain("Zoom 7.25");
   });
 
+  it("opens a map context menu and copies coordinate, scale, and zoom labels", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+
+    await wrapper.find(".map-canvas__map").trigger("contextmenu", {
+      clientX: 260,
+      clientY: 220
+    });
+
+    expect(document.body.textContent).toContain("复制坐标");
+    document.querySelectorAll<HTMLButtonElement>(".map-canvas__context-item")[0].click();
+    await flushPromises();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("坐标 104.06480, 30.65720 / EPSG:4326");
+    expect(wrapper.text()).toContain("已复制坐标");
+
+    await wrapper.find(".map-canvas__map").trigger("contextmenu", {
+      clientX: 260,
+      clientY: 220
+    });
+    document.querySelectorAll<HTMLButtonElement>(".map-canvas__context-item")[1].click();
+    await flushPromises();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("比例尺 1:2,500");
+
+    await wrapper.find(".map-canvas__map").trigger("contextmenu", {
+      clientX: 260,
+      clientY: 220
+    });
+    document.querySelectorAll<HTMLButtonElement>(".map-canvas__context-item")[2].click();
+    await flushPromises();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Zoom 7.25");
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
+  });
+
   it("can show only the active layer and then show all layers from the layer menu", async () => {
     const wrapper = mount(WebGisWorkbench);
     await flushPromises();
@@ -743,6 +803,7 @@ describe("WebGisWorkbench", () => {
 
     expect(document.body.textContent).toContain("独显图层");
     expect(document.body.textContent).toContain("缩放到图层");
+    expect(document.body.textContent).toContain("刷新图层");
     expect(document.body.textContent).toContain("打开属性表");
     expect(document.body.textContent).toContain("图层样式");
     expect(document.body.textContent).toContain("开启编辑");
@@ -784,6 +845,16 @@ describe("WebGisWorkbench", () => {
     await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[3].click();
     await flushPromises();
 
+    expect(editorMock.refreshLayer).toHaveBeenCalledWith("city");
+    expect(wrapper.text()).toContain("已刷新图层：public.china_2025_city");
+
+    await wrapper.findAll(".layer-panel__row")[1].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[4].click();
+    await flushPromises();
+
     expect(wrapper.text()).toContain("已打开属性表：public.china_2025_city");
     expect(document.body.textContent).toContain("属性表 - public.china_2025_city");
     expect(document.body.textContent).toContain("2/128 条记录");
@@ -802,6 +873,8 @@ describe("WebGisWorkbench", () => {
     expect(tabs[0].classList.contains("attribute-table__tab--active")).toBe(true);
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
     expect(tabs[1].classList.contains("attribute-table__tab--active")).toBe(false);
+    expect(tabs[2].textContent).toContain("属性计算器");
+    expect(tabs[3].textContent).toContain("SQL 查询");
 
     Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
       .find((button) => button.textContent?.trim() === "下一页")
@@ -872,6 +945,46 @@ describe("WebGisWorkbench", () => {
       .map((cell) => cell.textContent?.trim());
     expect(visibleFieldNames).toEqual(["id", "adcode", "name"]);
 
+    await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[2].click();
+    await flushPromises();
+    expect(document.body.textContent).toContain("目标字段");
+    const targetSelect = document.querySelector<HTMLSelectElement>(".attribute-table__tool-input");
+    expect(targetSelect).not.toBeNull();
+    setNativeInputValue(targetSelect!, "name");
+    targetSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    const expressionInput = document.querySelector<HTMLTextAreaElement>(".attribute-table__tool-textarea");
+    expect(expressionInput).not.toBeNull();
+    setNativeInputValue(expressionInput!, "upper(\"name\")");
+    expressionInput!.dispatchEvent(new InputEvent("input", { bubbles: true, data: "upper(\"name\")" }));
+    await flushPromises();
+    const calculateButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
+      .find((button) => button.textContent?.trim() === "执行计算")
+    expect(calculateButton?.disabled).toBe(false);
+    calculateButton?.click();
+    await flushPromises();
+
+    expect(vi.mocked(apiSend)).toHaveBeenCalledWith("/api/layers/city/calculate", "POST", {
+      targetField: "name",
+      expression: "upper(\"name\")",
+      where: undefined
+    });
+    expect(wrapper.text()).toContain("属性计算完成：name 更新 2 行");
+
+    await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[3].click();
+    await flushPromises();
+    expect(document.body.textContent).toContain("仅允许当前图层的单条 SELECT");
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
+      .find((button) => button.textContent?.trim() === "执行 SQL")
+      ?.click();
+    await flushPromises();
+
+    expect(vi.mocked(apiSend)).toHaveBeenCalledWith("/api/layers/city/query", "POST", {
+      sql: "select * from {layer}",
+      limit: 100
+    });
+    expect(document.body.textContent).toContain("SQL 查询完成：返回 1 条记录");
+    expect(document.body.textContent).toContain("成都市");
+
     await document.querySelector<HTMLButtonElement>(".attribute-table__close")?.click();
     await flushPromises();
 
@@ -881,7 +994,7 @@ describe("WebGisWorkbench", () => {
       clientX: 160,
       clientY: 260
     });
-    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[4].click();
+    await document.querySelectorAll<HTMLButtonElement>(".layer-panel__context-item")[5].click();
     await flushPromises();
 
     const styleDialog = document.querySelector<HTMLElement>(".workbench__style-dialog");

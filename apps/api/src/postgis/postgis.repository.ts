@@ -8,10 +8,22 @@ import type {
   FeatureSummary,
   FieldMeta,
   GeometryKind,
-  LayerRegistration
+  LayerRegistration,
+  SqlQueryResult,
+  AttributeCalculationResult
 } from "../types.js";
-import { buildSetClause, filterProperties, qualifiedTable, quoteIdent } from "../sql.js";
+import {
+  buildSafeAttributeExpression,
+  buildSafeLayerSelectSql,
+  buildSafeWhereExpression,
+  buildSetClause,
+  editableFields,
+  filterProperties,
+  qualifiedTable,
+  quoteIdent
+} from "../sql.js";
 import { toPoolConfig } from "../types.js";
+import type { AttributeCalculationDto } from "../layers/dto/attribute-calculation.dto.js";
 
 type SpatialTableRow = {
   table_schema: string;
@@ -267,6 +279,59 @@ export class PostgisRepository implements OnApplicationShutdown {
     return this.readFeature(config, layer, String(result.rows[0].id));
   }
 
+  async queryLayer(
+    config: DatasourceConfig,
+    layer: LayerRegistration,
+    sql: string,
+    limit: number
+  ): Promise<SqlQueryResult> {
+    this.assertQueryableLayer(layer);
+    const safeSql = this.toBadRequest(() => buildSafeLayerSelectSql(layer, sql, limit));
+    const pool = this.getPool(config);
+    const client = await pool.connect();
+    try {
+      await client.query("begin read only");
+      const result = await client.query<Record<string, unknown>>(safeSql);
+      await client.query("commit");
+      return {
+        columns: result.fields.map((field) => field.name),
+        rows: result.rows,
+        limit: Math.max(1, Math.min(200, limit))
+      };
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async calculateAttribute(
+    config: DatasourceConfig,
+    layer: LayerRegistration,
+    dto: AttributeCalculationDto
+  ): Promise<AttributeCalculationResult> {
+    this.assertEditableLayer(layer);
+    const targetField = editableFields(layer).find((field) => field.name === dto.targetField);
+    if (!targetField) {
+      throw new BadRequestException("Target field is not editable");
+    }
+    const expressionSql = this.toBadRequest(() => buildSafeAttributeExpression(layer, dto.expression));
+    const whereSql = this.toBadRequest(() => buildSafeWhereExpression(layer, dto.where));
+    const pool = this.getPool(config);
+    const result = await pool.query<{ affected: string }>(
+      `
+      update ${qualifiedTable(layer)}
+      set ${quoteIdent(targetField.name)} = ${expressionSql}
+      ${whereSql ? `where ${whereSql}` : ""}
+      `
+    );
+    return {
+      targetField: targetField.name,
+      affectedRows: result.rowCount ?? result.rows.length
+    };
+  }
+
   async updateFeature(
     config: DatasourceConfig,
     layer: LayerRegistration,
@@ -474,6 +539,14 @@ export class PostgisRepository implements OnApplicationShutdown {
       ...layer.fields.map((field) => field.name)
     ].filter(Boolean));
     return allowedColumns.has(sort) ? sort : layer.primaryKey!;
+  }
+
+  private toBadRequest<T>(task: () => T): T {
+    try {
+      return task();
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Invalid SQL");
+    }
   }
 
   private assertQueryableLayer(layer: LayerRegistration): void {

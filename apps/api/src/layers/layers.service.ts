@@ -2,7 +2,9 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatasourcesRepository } from "../datasources/datasources.repository.js";
 import { PostgisRepository } from "../postgis/postgis.repository.js";
 import type { FeaturePageQuery, FeaturePayload, LayerRegistration, LayerStyle } from "../types.js";
+import { AttributeCalculationDto } from "./dto/attribute-calculation.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
+import { SqlQueryDto } from "./dto/sql-query.dto.js";
 import { LayersRepository } from "./layers.repository.js";
 
 @Injectable()
@@ -34,6 +36,18 @@ export class LayersService {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
     return this.postgisRepository.listFeatures(datasource, layer, query);
+  }
+
+  async queryLayer(layerId: string, dto: SqlQueryDto) {
+    const layer = await this.getRequiredLayer(layerId);
+    const datasource = await this.getRequiredDatasource(layer.datasourceId);
+    return this.postgisRepository.queryLayer(datasource, layer, dto.sql, dto.limit);
+  }
+
+  async calculateAttribute(layerId: string, dto: AttributeCalculationDto) {
+    const layer = await this.getRequiredLayer(layerId);
+    const datasource = await this.getRequiredDatasource(layer.datasourceId);
+    return this.postgisRepository.calculateAttribute(datasource, layer, dto);
   }
 
   async createFeature(layerId: string, payload: FeaturePayload) {

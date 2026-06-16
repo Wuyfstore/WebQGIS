@@ -59,6 +59,7 @@ const {
   attributeTableLayer,
   attributeTableFeatures,
   attributeTableTotal,
+  attributeSqlResult,
   attributeTableQuery,
   visibleLayerIds,
   displayProjection,
@@ -78,7 +79,6 @@ const {
   isDrawing,
   isSnapEnabled,
   isDeleteDialogOpen,
-  mapCssVars,
   coordinateLabel,
   scaleLabel,
   projectionLabel,
@@ -469,6 +469,16 @@ async function handleRefreshAll() {
   editor.refreshLayer(activeLayer.value?.id);
 }
 
+function refreshLoadedLayer(layerId: string) {
+  workspace.setActiveLayer(layerId);
+  editor.refreshLayer(layerId);
+  const layer = layers.value.find((item) => item.id === layerId);
+  workspace.setStatus(
+    layer ? `已刷新图层：${layer.schema}.${layer.table}` : "已刷新图层",
+    "success"
+  );
+}
+
 function requestDatasourceConnectionDialog() {
   datasourceDialogRequestKey.value += 1;
   workspace.setStatus("打开 PostGIS 连接窗口", "neutral");
@@ -547,12 +557,40 @@ function zoomToLayer(layerId: string) {
   editor.zoomToLayerExtent(layerId);
 }
 
+function handleMapStatusCopy(kind: "coordinate" | "scale" | "zoom", value: string) {
+  const labels = {
+    coordinate: "坐标",
+    scale: "比例尺",
+    zoom: "Zoom"
+  } satisfies Record<typeof kind, string>;
+  workspace.setStatus(`已复制${labels[kind]}：${value}`, "success");
+}
+
 function openAttributeTable(layerId: string) {
   void workspace.openAttributeTable(layerId);
 }
 
 function closeAttributeTable() {
   workspace.closeAttributeTable();
+}
+
+function runAttributeSql(payload: { sql: string; limit: number }) {
+  const layer = attributeTableLayer.value;
+  if (!layer) {
+    return;
+  }
+  void workspace.runLayerSqlQuery(layer.id, payload.sql, payload.limit);
+}
+
+async function runAttributeCalculation(payload: { targetField: string; expression: string; where?: string }) {
+  const layer = attributeTableLayer.value;
+  if (!layer) {
+    return;
+  }
+  const result = await workspace.calculateLayerAttribute(layer.id, payload);
+  if (result) {
+    editor.refreshLayer(layer.id);
+  }
 }
 
 function openStyleEditor(layerId: string) {
@@ -637,11 +675,6 @@ function validateActiveLayer() {
         <component :is="item.icon" class="workbench__tool-icon" aria-hidden="true" />
         <span class="workbench__tool-label">{{ item.label }}</span>
       </button>
-      <span class="workbench__separator"></span>
-      <button class="workbench__tool workbench__tool--wide focus-ring" :disabled="busy" type="button" @click="handleRefreshAll">
-        <FolderOpened class="workbench__tool-icon" aria-hidden="true" />
-        刷新图层
-      </button>
     </section>
 
     <section class="workbench__contextbar" aria-label="编辑上下文">
@@ -651,17 +684,20 @@ function validateActiveLayer() {
       <span class="workbench__context-badge">{{ activeLayerEditStatus }}</span>
       <span class="workbench__context-label">捕捉:</span>
       <span class="workbench__context-field">顶点 + 线段, 8 px</span>
-      <span class="workbench__context-label">显示坐标系:</span>
-      <select
-        class="workbench__context-select focus-ring"
-        :value="displayProjection"
-        aria-label="当前项目显示坐标系"
-        @change="workspace.setDisplayProjection(($event.target as HTMLSelectElement).value)"
-      >
-        <option v-for="projection in projectionOptions" :key="projection" :value="projection">
-          {{ projection }}
-        </option>
-      </select>
+      <div class="workbench__crs-panel" aria-label="QGIS 风格坐标参考系统">
+        <span class="workbench__crs-title">项目 CRS</span>
+        <select
+          class="workbench__context-select focus-ring"
+          :value="displayProjection"
+          aria-label="当前项目显示坐标系"
+          @change="workspace.setDisplayProjection(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="projection in projectionOptions" :key="projection" :value="projection">
+            {{ projection }}
+          </option>
+        </select>
+        <span class="workbench__crs-hint">{{ projectionLabel }}</span>
+      </div>
       <span class="workbench__context-note">显示链路: MVT</span>
       <span class="workbench__context-note">编辑链路: 原始 PostGIS geometry</span>
     </section>
@@ -694,6 +730,7 @@ function validateActiveLayer() {
           @toggle="workspace.toggleLayer"
           @solo="workspace.showOnlyLayer"
           @restore-visibility="workspace.restorePreviousVisibleLayers"
+          @refresh-layer="refreshLoadedLayer"
           @zoom-to-layer="zoomToLayer"
           @open-attribute-table="openAttributeTable"
           @open-style-editor="openStyleEditor"
@@ -713,7 +750,9 @@ function validateActiveLayer() {
         :has-selected-feature="hasSelectedFeature"
         :is-editing-layer="isEditingActiveLayer"
         :is-drawing="isDrawing"
-        :map-style="mapCssVars"
+        :coordinate-label="coordinateLabel"
+        :scale-label="scaleLabel"
+        :zoom-level="zoomLevel"
         @ready="handleMapReady"
         @draw="startDrawing"
         @save="handleSaveFeature"
@@ -721,6 +760,7 @@ function validateActiveLayer() {
         @clear="handleClearDraft"
         @toggle-edit="toggleEditingActiveLayer"
         @layer-drop="loadLayerToMap"
+        @copy-map-status="handleMapStatusCopy"
       />
 
       <EditInspector
@@ -847,9 +887,12 @@ function validateActiveLayer() {
       :layer="attributeTableLayer"
       :features="attributeTableFeatures"
       :total="attributeTableTotal"
+      :sql-result="attributeSqlResult"
       :query="attributeTableQuery"
       :busy="busy"
       @query="workspace.updateAttributeTableQuery"
+      @calculate="runAttributeCalculation"
+      @sql-query="runAttributeSql"
       @close="closeAttributeTable"
     />
   </main>
@@ -1050,6 +1093,32 @@ function validateActiveLayer() {
   background: #ffffff;
   color: var(--qgis-text);
   padding: 2px 6px;
+}
+
+.workbench__crs-panel {
+  display: grid;
+  grid-template-columns: auto 120px minmax(180px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 420px;
+  border: 1px solid #b4b4b4;
+  background: #eeeeee;
+  padding: 3px 8px;
+}
+
+.workbench__crs-title {
+  color: var(--qgis-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workbench__crs-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--qgis-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workbench__context-badge {

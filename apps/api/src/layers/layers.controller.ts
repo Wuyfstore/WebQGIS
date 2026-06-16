@@ -2,8 +2,10 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, P
 import { FeatureParamDto } from "./dto/feature-param.dto.js";
 import { FeatureListQueryDto } from "./dto/feature-list-query.dto.js";
 import { FeaturePayloadDto } from "./dto/feature-payload.dto.js";
+import { AttributeCalculationDto } from "./dto/attribute-calculation.dto.js";
 import { LayerParamDto } from "./dto/layer-param.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
+import { SqlQueryDto } from "./dto/sql-query.dto.js";
 import { TileParamDto } from "./dto/tile-param.dto.js";
 import { LayersService } from "./layers.service.js";
 
@@ -27,6 +29,16 @@ export class LayersController {
   @Get(":id/features/:pk")
   readFeature(@Param() params: FeatureParamDto) {
     return this.layersService.readFeature(params.id, params.pk);
+  }
+
+  @Post(":id/query")
+  queryLayer(@Param() params: LayerParamDto, @Body() dto: SqlQueryDto) {
+    return this.layersService.queryLayer(params.id, dto);
+  }
+
+  @Post(":id/calculate")
+  calculateAttribute(@Param() params: LayerParamDto, @Body() dto: AttributeCalculationDto) {
+    return this.layersService.calculateAttribute(params.id, dto);
   }
 
   @Post(":id/features")

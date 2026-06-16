@@ -18,6 +18,7 @@ const emit = defineEmits<{
   toggle: [layerId: string];
   solo: [layerId: string];
   restoreVisibility: [];
+  refreshLayer: [layerId: string];
   zoomToLayer: [layerId: string];
   openAttributeTable: [layerId: string];
   openStyleEditor: [layerId: string];
@@ -167,6 +168,9 @@ onBeforeUnmount(() => {
         </button>
         <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('zoomToLayer', layerId))">
           缩放到图层
+        </button>
+        <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('refreshLayer', layerId))">
+          刷新图层
         </button>
         <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('openAttributeTable', layerId))">
           打开属性表

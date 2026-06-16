@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, useTemplateRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef } from "vue";
 import { getGeometryModes } from "../../utils/layer";
 import { hasLayerDragPayload, readLayerDragPayload } from "../../utils/layerDrag";
 import type { GeometryMode, LayerRegistration } from "../../types/gis";
@@ -12,7 +12,9 @@ const props = defineProps<{
   hasSelectedFeature: boolean;
   isEditingLayer: boolean;
   isDrawing: boolean;
-  mapStyle?: Record<string, string>;
+  coordinateLabel: string;
+  scaleLabel: string;
+  zoomLevel: number;
 }>();
 
 const drawMode = defineModel<GeometryMode>("drawMode", { required: true });
@@ -25,11 +27,21 @@ const emit = defineEmits<{
   clear: [];
   toggleEdit: [];
   layerDrop: [layerId: string];
+  copyMapStatus: [kind: "coordinate" | "scale" | "zoom", value: string];
 }>();
 
 const mapRoot = useTemplateRef<HTMLDivElement>("mapRoot");
 const isLayerDragOver = shallowRef(false);
+const contextMenu = shallowRef({
+  visible: false,
+  x: 0,
+  y: 0
+});
 const geometryModes = computed(() => getGeometryModes(props.activeLayer));
+const contextMenuStyle = computed(() => ({
+  left: `${contextMenu.value.x}px`,
+  top: `${contextMenu.value.y}px`
+}));
 
 function handleLayerDragOver(event: DragEvent) {
   if (!hasLayerDragPayload(event, props.dragLayerFallbackId)) {
@@ -53,10 +65,37 @@ function handleLayerDrop(event: DragEvent) {
   emit("layerDrop", layerId);
 }
 
+function openMapContextMenu(event: MouseEvent) {
+  event.preventDefault();
+  contextMenu.value = {
+    visible: true,
+    x: Math.min(event.clientX, window.innerWidth - 176),
+    y: Math.min(event.clientY, window.innerHeight - 94)
+  };
+  window.addEventListener("click", closeMapContextMenu, { once: true });
+}
+
+function closeMapContextMenu() {
+  contextMenu.value = {
+    ...contextMenu.value,
+    visible: false
+  };
+}
+
+async function copyMapValue(kind: "coordinate" | "scale" | "zoom", value: string) {
+  closeMapContextMenu();
+  await navigator.clipboard?.writeText(value);
+  emit("copyMapStatus", kind, value);
+}
+
 onMounted(() => {
   if (mapRoot.value) {
     emit("ready", mapRoot.value);
   }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("click", closeMapContextMenu);
 });
 </script>
 
@@ -66,12 +105,12 @@ onMounted(() => {
       ref="mapRoot"
       class="map-canvas__map"
       :class="{ 'map-canvas__map--drop-target': isLayerDragOver }"
-      :style="mapStyle"
       aria-label="地图画布"
       @dragenter="handleLayerDragOver"
       @dragover="handleLayerDragOver"
       @dragleave="isLayerDragOver = false"
       @drop="handleLayerDrop"
+      @contextmenu="openMapContextMenu"
     >
       <div v-if="isLayerDragOver" class="map-canvas__drop-hint">释放以添加空间图层</div>
     </div>
@@ -134,6 +173,20 @@ onMounted(() => {
         {{ isEditingLayer ? "编辑已开启：草稿来自原始 PostGIS geometry" : "先开启编辑，再绘制、修改或保存要素" }}
       </p>
     </div>
+
+    <Teleport to="body">
+      <div v-if="contextMenu.visible" class="map-canvas__context-menu" :style="contextMenuStyle" role="menu">
+        <button class="map-canvas__context-item" type="button" role="menuitem" @click="copyMapValue('coordinate', coordinateLabel)">
+          复制坐标
+        </button>
+        <button class="map-canvas__context-item" type="button" role="menuitem" @click="copyMapValue('scale', scaleLabel)">
+          复制比例尺
+        </button>
+        <button class="map-canvas__context-item" type="button" role="menuitem" @click="copyMapValue('zoom', `Zoom ${zoomLevel.toFixed(2)}`)">
+          复制 Zoom
+        </button>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -151,10 +204,7 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   min-height: calc(100vh - 134px);
-  background:
-    linear-gradient(rgba(215, 208, 185, var(--map-grid-opacity, 0.42)) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(215, 208, 185, var(--map-grid-opacity, 0.42)) 1px, transparent 1px);
-  background-size: var(--map-grid-size, 64px) var(--map-grid-size, 64px);
+  background: var(--qgis-map-bg);
 }
 
 .map-canvas__map--drop-target {
@@ -264,6 +314,32 @@ onMounted(() => {
   padding: 6px 10px;
   color: var(--qgis-muted);
   font-size: 12px;
+}
+
+.map-canvas__context-menu {
+  position: fixed;
+  z-index: var(--qgis-z-menu);
+  width: 168px;
+  border: 1px solid #8d8d8d;
+  background: #f7f7f7;
+  box-shadow: 2px 4px 12px rgba(15, 23, 42, 0.24);
+  padding: 3px;
+  font-size: 11px;
+}
+
+.map-canvas__context-item {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--qgis-text);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.map-canvas__context-item:hover {
+  background: var(--qgis-row-active);
 }
 
 @media (max-width: 760px) {

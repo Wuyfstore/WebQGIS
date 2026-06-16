@@ -6,6 +6,7 @@ import View from "ol/View";
 import Feature from "ol/Feature";
 import GeoJSON from "ol/format/GeoJSON";
 import MVT from "ol/format/MVT";
+import Graticule from "ol/layer/Graticule";
 import TileLayer from "ol/layer/VectorTile";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
@@ -107,15 +108,6 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const coordinateLabel = computed(() => formatCoordinateLabel(pointerCoordinate.value, options.displayProjection.value));
   const scaleLabel = computed(() => formatScaleLabel(scaleDenominator.value));
   const projectionLabel = computed(() => projectionStatusLabel(options.displayProjection.value));
-  const mapCssVars = computed(() => {
-    const zoom = zoomLevel.value;
-    const gridSize = Math.max(24, Math.min(96, Math.round(96 / Math.max(1, zoom / 4))));
-    const gridOpacity = Math.max(0.28, Math.min(0.82, 0.24 + zoom / 24));
-    return {
-      "--map-grid-size": `${gridSize}px`,
-      "--map-grid-opacity": String(gridOpacity)
-    };
-  });
   const layerMap = new globalThis.Map<string, TileLayer<VectorTileSource>>();
   const { isRevealed: isDeleteDialogOpen, reveal, confirm, cancel } = useConfirmDialog();
 
@@ -127,6 +119,15 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   let viewChangeKey: EventsKey | null = null;
 
   const editSource = new VectorSource();
+  const graticuleLayer = new Graticule({
+    showLabels: true,
+    wrapX: true,
+    strokeStyle: new Stroke({
+      color: "rgba(126, 126, 126, 0.42)",
+      width: 1,
+      lineDash: [4, 4]
+    })
+  });
   const editLayer = new VectorLayer({
     source: editSource,
     style: new Style({
@@ -146,7 +147,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     map.value = new OlMap({
       target: options.mapElement.value,
-      layers: [editLayer],
+      layers: [graticuleLayer, editLayer],
       view: new View({
         center: fromLonLat([104.29, 35.5]),
         zoom: 4
@@ -485,7 +486,6 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   return {
     map,
-    mapCssVars,
     coordinateLabel,
     scaleLabel,
     projectionLabel,

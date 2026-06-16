@@ -21,6 +21,23 @@ export type FeaturePage = {
   offset: number;
 };
 
+export type SqlQueryResult = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  limit: number;
+};
+
+export type AttributeCalculationPayload = {
+  targetField: string;
+  expression: string;
+  where?: string;
+};
+
+export type AttributeCalculationResult = {
+  targetField: string;
+  affectedRows: number;
+};
+
 export type AttributeTableQuery = {
   limit: number;
   offset: number;

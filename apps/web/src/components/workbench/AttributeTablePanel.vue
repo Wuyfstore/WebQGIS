@@ -2,12 +2,13 @@
 import { Close } from "@element-plus/icons-vue";
 import { useDraggable, useSorted } from "@vueuse/core";
 import { computed, shallowRef, useTemplateRef } from "vue";
-import type { AttributeTableQuery, FeatureSummary, FieldMeta, LayerRegistration } from "../../types/gis";
+import type { AttributeCalculationPayload, AttributeTableQuery, FeatureSummary, FieldMeta, LayerRegistration, SqlQueryResult } from "../../types/gis";
 
 const props = defineProps<{
   layer: LayerRegistration;
   features: FeatureSummary[];
   total: number;
+  sqlResult: SqlQueryResult | null;
   query: AttributeTableQuery;
   busy: boolean;
 }>();
@@ -15,11 +16,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   query: [patch: Partial<AttributeTableQuery>];
+  calculate: [payload: AttributeCalculationPayload];
+  sqlQuery: [payload: { sql: string; limit: number }];
 }>();
 
 type FieldSortKey = "name" | "type" | "nullable" | "defaultValue" | "editable";
 type SortDirection = "asc" | "desc";
-type ActiveTab = "records" | "fields";
+type ActiveTab = "records" | "fields" | "calculator" | "sql";
 
 const panelRef = useTemplateRef<HTMLElement>("panelRef");
 const handleRef = useTemplateRef<HTMLElement>("handleRef");
@@ -29,6 +32,11 @@ const recordSearchDraft = shallowRef("");
 const sortKey = shallowRef<FieldSortKey>("name");
 const sortDirection = shallowRef<SortDirection>("asc");
 const columnWidths = shallowRef<Record<string, number>>({});
+const calculatorTargetField = shallowRef("");
+const calculatorExpression = shallowRef("");
+const calculatorWhere = shallowRef("");
+const sqlDraft = shallowRef("select * from {layer}");
+const sqlLimit = shallowRef(100);
 
 const { style: draggableStyle } = useDraggable(panelRef, {
   handle: handleRef,
@@ -39,6 +47,7 @@ const { style: draggableStyle } = useDraggable(panelRef, {
 const layerLabel = computed(() => `${props.layer.schema}.${props.layer.table}`);
 const normalizedFieldSearch = computed(() => fieldSearch.value.trim().toLowerCase());
 const propertyFields = computed(() => props.layer.fields.filter((field) => field.name !== props.layer.geometryColumn));
+const editablePropertyFields = computed(() => propertyFields.value.filter((field) => field.editable));
 const displayColumns = computed(() => propertyFields.value.slice(0, 12));
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.query.limit)));
 const currentPage = computed(() => Math.floor(props.query.offset / props.query.limit) + 1);
@@ -94,6 +103,28 @@ const sortControls = [
   { key: "defaultValue", label: "默认值" },
   { key: "editable", label: "可编辑" }
 ] satisfies { key: FieldSortKey; label: string }[];
+
+function submitCalculation() {
+  const targetField = calculatorTargetField.value || editablePropertyFields.value[0]?.name;
+  if (!targetField || !calculatorExpression.value.trim()) {
+    return;
+  }
+  emit("calculate", {
+    targetField,
+    expression: calculatorExpression.value.trim(),
+    where: calculatorWhere.value.trim() || undefined
+  });
+}
+
+function submitSqlQuery() {
+  if (!sqlDraft.value.trim()) {
+    return;
+  }
+  emit("sqlQuery", {
+    sql: sqlDraft.value.trim(),
+    limit: sqlLimit.value
+  });
+}
 
 function columnStyle(column: string) {
   const width = columnWidths.value[column] ?? (column === "__id" ? 96 : 136);
@@ -301,6 +332,26 @@ function boolLabel(value: boolean) {
       >
         字段结构
       </button>
+      <button
+        class="attribute-table__tab focus-ring"
+        :class="{ 'attribute-table__tab--active': activeTab === 'calculator' }"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === 'calculator'"
+        @click="activeTab = 'calculator'"
+      >
+        属性计算器
+      </button>
+      <button
+        class="attribute-table__tab focus-ring"
+        :class="{ 'attribute-table__tab--active': activeTab === 'sql' }"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === 'sql'"
+        @click="activeTab = 'sql'"
+      >
+        SQL 查询
+      </button>
     </div>
 
     <template v-if="activeTab === 'records'">
@@ -373,7 +424,7 @@ function boolLabel(value: boolean) {
       </div>
     </template>
 
-    <template v-else>
+    <template v-else-if="activeTab === 'fields'">
       <section class="attribute-table__controls" aria-label="字段浏览">
         <label class="attribute-table__filter">
           <span class="attribute-table__filter-label">字段过滤</span>
@@ -416,6 +467,95 @@ function boolLabel(value: boolean) {
           <tbody v-else>
             <tr>
               <td class="attribute-table__empty" colspan="5">{{ emptyFieldLabel }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <template v-else-if="activeTab === 'calculator'">
+      <section class="attribute-table__tool-panel" aria-label="属性计算器">
+        <label class="attribute-table__tool-field">
+          <span>目标字段</span>
+          <select v-model="calculatorTargetField" class="attribute-table__tool-input focus-ring" :disabled="busy || editablePropertyFields.length === 0">
+            <option value="">选择可编辑字段</option>
+            <option v-for="field in editablePropertyFields" :key="field.name" :value="field.name">
+              {{ field.name }} · {{ typeLabel(field) }}
+            </option>
+          </select>
+        </label>
+        <label class="attribute-table__tool-field attribute-table__tool-field--wide">
+          <span>表达式</span>
+          <textarea
+            v-model="calculatorExpression"
+            class="attribute-table__tool-textarea focus-ring"
+            :disabled="busy"
+            placeholder="例如 upper(&quot;name&quot;) 或 &quot;adcode&quot; + 1"
+          ></textarea>
+        </label>
+        <label class="attribute-table__tool-field attribute-table__tool-field--wide">
+          <span>WHERE 条件</span>
+          <input
+            v-model="calculatorWhere"
+            class="attribute-table__tool-input focus-ring"
+            :disabled="busy"
+            placeholder='可选，例如 "adcode" is not null'
+          />
+        </label>
+        <button class="attribute-table__pager-button focus-ring" :disabled="busy || editablePropertyFields.length === 0 || !calculatorExpression.trim()" type="button" @click="submitCalculation">
+          执行计算
+        </button>
+        <p class="attribute-table__tool-note">
+          字段请使用双引号；服务端仅允许当前图层字段、只读表达式和少量安全函数。
+        </p>
+      </section>
+    </template>
+
+    <template v-else>
+      <section class="attribute-table__tool-panel" aria-label="SQL 查询">
+        <label class="attribute-table__tool-field attribute-table__tool-field--wide">
+          <span>SQL</span>
+          <textarea
+            v-model="sqlDraft"
+            class="attribute-table__tool-textarea attribute-table__tool-textarea--sql focus-ring"
+            :disabled="busy"
+            spellcheck="false"
+          ></textarea>
+        </label>
+        <label class="attribute-table__tool-field">
+          <span>返回上限</span>
+          <select v-model.number="sqlLimit" class="attribute-table__tool-input focus-ring" :disabled="busy">
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+            <option :value="200">200</option>
+          </select>
+        </label>
+        <button class="attribute-table__pager-button focus-ring" :disabled="busy || !sqlDraft.trim()" type="button" @click="submitSqlQuery">
+          执行 SQL
+        </button>
+        <p class="attribute-table__tool-note">
+          仅允许当前图层的单条 SELECT，可使用 {layer} 代表当前表；服务端强制只读事务和 LIMIT。
+        </p>
+      </section>
+      <div v-if="sqlResult" class="attribute-table__table-wrap">
+        <table class="attribute-table__table">
+          <thead>
+            <tr>
+              <th v-for="column in sqlResult.columns" :key="column" scope="col">
+                {{ column }}
+              </th>
+            </tr>
+          </thead>
+          <tbody v-if="sqlResult.rows.length > 0">
+            <tr v-for="(row, rowIndex) in sqlResult.rows" :key="rowIndex">
+              <td v-for="column in sqlResult.columns" :key="column">
+                {{ valueLabel(row[column]) }}
+              </td>
+            </tr>
+          </tbody>
+          <tbody v-else>
+            <tr>
+              <td class="attribute-table__empty" :colspan="Math.max(1, sqlResult.columns.length)">SQL 查询无结果</td>
             </tr>
           </tbody>
         </table>
@@ -739,6 +879,51 @@ function boolLabel(value: boolean) {
 .attribute-table__empty {
   color: var(--qgis-muted);
   text-align: center;
+}
+
+.attribute-table__tool-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  background: #f5f5f5;
+}
+
+.attribute-table__tool-field {
+  display: grid;
+  gap: 5px;
+  color: var(--qgis-muted);
+  font-size: 11px;
+}
+
+.attribute-table__tool-field--wide,
+.attribute-table__tool-note {
+  grid-column: 1 / -1;
+}
+
+.attribute-table__tool-input,
+.attribute-table__tool-textarea {
+  min-height: 26px;
+  border: 1px solid #aeb6bf;
+  background: var(--qgis-input);
+  color: var(--qgis-text);
+  padding: 4px 7px;
+  font: inherit;
+}
+
+.attribute-table__tool-textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.attribute-table__tool-textarea--sql {
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+.attribute-table__tool-note {
+  margin: 0;
+  color: var(--qgis-muted);
+  font-size: 11px;
 }
 
 @media (max-width: 760px) {

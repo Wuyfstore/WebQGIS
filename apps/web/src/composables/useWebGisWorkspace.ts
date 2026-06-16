@@ -6,11 +6,14 @@ import type {
   Datasource,
   DatasourceForm,
   AttributeTableQuery,
+  AttributeCalculationPayload,
+  AttributeCalculationResult,
   FeaturePage,
   FeatureSummary,
   GeoJsonFeature,
   LayerRegistration,
   LayerStylePatch,
+  SqlQueryResult,
   StatusMessage
 } from "../types/gis";
 
@@ -41,6 +44,7 @@ export function useWebGisWorkspace() {
   const displayProjection = shallowRef("EPSG:3857");
   const attributeTableFeatures = shallowRef<FeatureSummary[]>([]);
   const attributeTableTotal = shallowRef(0);
+  const attributeSqlResult = shallowRef<SqlQueryResult | null>(null);
   const attributeTableQuery = shallowRef<AttributeTableQuery>({
     limit: 100,
     offset: 0,
@@ -332,10 +336,39 @@ export function useWebGisWorkspace() {
     });
   }
 
+  async function runLayerSqlQuery(layerId: string, sql: string, limit: number) {
+    const layer = layers.value.find((item) => item.id === layerId);
+    if (!layer?.queryable) {
+      setStatus("当前图层不可执行 SQL 查询", "warning");
+      return undefined;
+    }
+    return withBusy(async () => {
+      const result = await apiSend<SqlQueryResult>(`/api/layers/${layer.id}/query`, "POST", { sql, limit });
+      attributeSqlResult.value = result;
+      setStatus(`SQL 查询完成：返回 ${result.rows.length} 条记录`, "success");
+      return result;
+    });
+  }
+
+  async function calculateLayerAttribute(layerId: string, payload: AttributeCalculationPayload) {
+    const layer = layers.value.find((item) => item.id === layerId);
+    if (!layer?.editable) {
+      setStatus("当前图层不可执行属性计算", "warning");
+      return undefined;
+    }
+    return withBusy(async () => {
+      const result = await apiSend<AttributeCalculationResult>(`/api/layers/${layer.id}/calculate`, "POST", payload);
+      await updateAttributeTableQuery({ offset: 0 });
+      setStatus(`属性计算完成：${result.targetField} 更新 ${result.affectedRows} 行`, "success");
+      return result;
+    });
+  }
+
   function closeAttributeTable() {
     attributeTableLayerId.value = null;
     attributeTableFeatures.value = [];
     attributeTableTotal.value = 0;
+    attributeSqlResult.value = null;
   }
 
   async function saveFeature() {
@@ -391,6 +424,7 @@ export function useWebGisWorkspace() {
     attributeTableLayer,
     attributeTableFeatures,
     attributeTableTotal,
+    attributeSqlResult,
     attributeTableQuery,
     visibleLayerIds,
     visibleLayers,
@@ -420,6 +454,8 @@ export function useWebGisWorkspace() {
     readFeature,
     openAttributeTable,
     updateAttributeTableQuery,
+    runLayerSqlQuery,
+    calculateLayerAttribute,
     closeAttributeTable,
     saveFeature,
     deleteSelectedFeature,

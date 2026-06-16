@@ -94,6 +94,17 @@ export type FeaturePage = {
   offset: number;
 };
 
+export type SqlQueryResult = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  limit: number;
+};
+
+export type AttributeCalculationResult = {
+  targetField: string;
+  affectedRows: number;
+};
+
 export function toPoolConfig(config: DatasourceConfig): PoolConfig {
   return {
     host: config.host,
