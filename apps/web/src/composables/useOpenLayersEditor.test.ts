@@ -10,6 +10,7 @@ import {
   formatCoordinateLabel,
   formatScaleLabel,
   isHighlightableGeoJsonFeature,
+  isFeatureCovered,
   overlayLayerZIndexes,
   projectLayerExtent,
   projectionStatusLabel,
@@ -38,6 +39,16 @@ describe("readVectorTileFeaturePk", () => {
 
   it("returns null when neither MVT feature id nor id property exists", () => {
     expect(readVectorTileFeaturePk(createFeatureStub(undefined, undefined))).toBeNull();
+  });
+
+  it("detects MVT features hidden by an edit overlay cover", () => {
+    const covered = new Map<string, Set<string>>([
+      ["city", new Set(["1024"])]
+    ]);
+
+    expect(isFeatureCovered(covered, "city", createFeatureStub("1024"))).toBe(true);
+    expect(isFeatureCovered(covered, "city", createFeatureStub("1025"))).toBe(false);
+    expect(isFeatureCovered(covered, "province", createFeatureStub("1024"))).toBe(false);
   });
 
   it("projects a layer extent from EPSG:4326 to EPSG:3857", () => {

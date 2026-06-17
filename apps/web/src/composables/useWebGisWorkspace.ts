@@ -513,6 +513,7 @@ export function useWebGisWorkspace() {
         ? await apiSend<GeoJsonFeature>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "PUT", payload)
         : await apiSend<GeoJsonFeature>(`/api/layers/${layer.id}/features`, "POST", payload);
       setSelectedFeature(saved);
+      draftGeometry.value = saved.geometry;
       markDraftClean();
       setStatus(`保存成功：要素 ${saved.id ?? selectedFeatureId.value ?? "已写入"} 已写入 PostGIS，图层已自动刷新`, "success");
       return saved;

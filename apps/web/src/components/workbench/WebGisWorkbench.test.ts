@@ -192,6 +192,9 @@ const editorMock = {
   zoomLevel: shallowRef(7.25),
   initializeMap: vi.fn(),
   loadEditableFeature: vi.fn(),
+  markFeatureCovered: vi.fn(),
+  clearCoveredFeature: vi.fn(),
+  clearCoveredFeatures: vi.fn(),
   clearSelectionFeatures: vi.fn(),
   clearEditableFeature: vi.fn(),
   clearDraft: vi.fn(),
@@ -209,6 +212,7 @@ const editorMock = {
 };
 
 let editorOptions: {
+  selectedFeatureId: { value: string | null };
   draftGeometry: { value: unknown };
   markDraftDirty?: () => void;
 } | null = null;
@@ -279,6 +283,18 @@ vi.mock("../../api", () => ({
         style: {
           ...sampleLayers[1].style,
           ...(payload as object)
+        }
+      };
+    }
+    if (path === "/api/layers/city/features/2048" && method === "PUT") {
+      return {
+        type: "Feature" as const,
+        id: 2048,
+        geometry: { type: "Point", coordinates: [105, 31] },
+        properties: {
+          id: 2048,
+          name: "服务端确认名称",
+          adcode: 510104
         }
       };
     }
@@ -872,6 +888,73 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.clearSelectionFeatures).toHaveBeenCalled();
     expect(editorMock.clearEditableFeature).not.toHaveBeenCalled();
     expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("click");
+  });
+
+  it("uses the saved server feature as the immediate edit overlay and MVT cover", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.selectedFeatureId.value = "2048";
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    editorOptions!.markDraftDirty?.();
+    await flushPromises();
+    editorMock.loadEditableFeature.mockClear();
+    editorMock.markFeatureCovered.mockClear();
+    editorMock.refreshLayer.mockClear();
+
+    const saveTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "保存当前编辑");
+    await saveTool?.trigger("click");
+    await flushPromises();
+
+    const savedFeature = {
+      type: "Feature",
+      id: 2048,
+      geometry: { type: "Point", coordinates: [105, 31] },
+      properties: {
+        id: 2048,
+        name: "服务端确认名称",
+        adcode: 510104
+      }
+    };
+    expect(editorMock.loadEditableFeature).toHaveBeenCalledWith(savedFeature);
+    expect(editorMock.markFeatureCovered).toHaveBeenCalledWith("city", 2048);
+    expect(editorMock.refreshLayer).toHaveBeenCalledWith("city");
+    expect(editorOptions!.draftGeometry.value).toEqual({ type: "Point", coordinates: [105, 31] });
+    expect(wrapper.find<HTMLInputElement>(".edit-inspector__input").element.value).toBe("服务端确认名称");
+  });
+
+  it("does not cover MVT features when save fails", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.selectedFeatureId.value = "missing";
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    editorOptions!.markDraftDirty?.();
+    await flushPromises();
+    editorMock.loadEditableFeature.mockClear();
+    editorMock.markFeatureCovered.mockClear();
+    editorMock.refreshLayer.mockClear();
+
+    const saveTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "保存当前编辑");
+    await saveTool?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Unhandled apiSend PUT /api/layers/city/features/missing");
+    expect(editorMock.loadEditableFeature).not.toHaveBeenCalled();
+    expect(editorMock.markFeatureCovered).not.toHaveBeenCalled();
+    expect(editorMock.refreshLayer).not.toHaveBeenCalledWith("city");
   });
 
   it("switches active layers from the context bar and hides snap details when snapping is off", async () => {

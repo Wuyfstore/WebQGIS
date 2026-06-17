@@ -50,6 +50,7 @@ const projectionHints: Record<string, string> = {
 const selectionSketchZIndex = 900;
 const selectedFeatureZIndex = 980;
 const editFeatureZIndex = 1000;
+const hiddenFeatureStyle: Style[] = [];
 
 export function overlayLayerZIndexes() {
   return {
@@ -67,6 +68,15 @@ export function readVectorTileFeaturePk(feature: Pick<FeatureLike, "get" | "getI
     return null;
   }
   return String(pk);
+}
+
+export function isFeatureCovered(
+  coveredFeatureIdsByLayer: ReadonlyMap<string, ReadonlySet<string>>,
+  layerId: string,
+  feature: Pick<FeatureLike, "get" | "getId">
+) {
+  const featureId = readVectorTileFeaturePk(feature);
+  return Boolean(featureId && coveredFeatureIdsByLayer.get(layerId)?.has(featureId));
 }
 
 export function projectLayerExtent(extent: LayerRegistration["extent"]) {
@@ -230,6 +240,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const scaleLabel = computed(() => formatScaleLabel(scaleDenominator.value));
   const projectionLabel = computed(() => projectionStatusLabel(options.displayProjection.value));
   const layerMap = new globalThis.Map<string, MountedMapLayer>();
+  const coveredFeatureIdsByLayer = new globalThis.Map<string, Set<string>>();
   const { isRevealed: isDeleteDialogOpen, reveal, confirm, cancel } = useConfirmDialog();
 
   let modifyInteraction: Modify | null = null;
@@ -428,8 +439,12 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   }
 
   function layerStyle(layer: LayerRegistration, feature: FeatureLike) {
+    const featureId = readVectorTileFeaturePk(feature);
+    if (isFeatureCovered(coveredFeatureIdsByLayer, layer.id, feature)) {
+      return hiddenFeatureStyle;
+    }
     const active = options.activeLayer.value?.id === layer.id;
-    const selected = readVectorTileFeaturePk(feature) === options.selectedFeatureId.value;
+    const selected = featureId === options.selectedFeatureId.value;
     return new Style({
       image: new CircleStyle({
         radius: active || selected ? layer.style.pointRadius + 2 : layer.style.pointRadius,
@@ -716,6 +731,41 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }) as Feature<Geometry>;
     editSource.addFeature(parsed);
     updateDraftGeometry();
+  }
+
+  function markFeatureCovered(layerId: string | undefined, featureId: string | number | null | undefined) {
+    if (!layerId || featureId === undefined || featureId === null || featureId === "") {
+      return;
+    }
+    const normalizedFeatureId = String(featureId);
+    const coveredFeatureIds = coveredFeatureIdsByLayer.get(layerId) ?? new Set<string>();
+    coveredFeatureIds.add(normalizedFeatureId);
+    coveredFeatureIdsByLayer.set(layerId, coveredFeatureIds);
+    refreshLayerStyles();
+  }
+
+  function clearCoveredFeature(layerId: string | undefined, featureId: string | number | null | undefined) {
+    if (!layerId || featureId === undefined || featureId === null || featureId === "") {
+      return;
+    }
+    const coveredFeatureIds = coveredFeatureIdsByLayer.get(layerId);
+    if (!coveredFeatureIds) {
+      return;
+    }
+    coveredFeatureIds.delete(String(featureId));
+    if (coveredFeatureIds.size === 0) {
+      coveredFeatureIdsByLayer.delete(layerId);
+    }
+    refreshLayerStyles();
+  }
+
+  function clearCoveredFeatures(layerId?: string) {
+    if (layerId) {
+      coveredFeatureIdsByLayer.delete(layerId);
+    } else {
+      coveredFeatureIdsByLayer.clear();
+    }
+    refreshLayerStyles();
   }
 
   function clearSelectionFeatures() {
@@ -1024,6 +1074,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     isDeleteDialogOpen,
     initializeMap,
     loadEditableFeature,
+    markFeatureCovered,
+    clearCoveredFeature,
+    clearCoveredFeatures,
     clearSelectionFeatures,
     clearEditableFeature,
     clearDraft,

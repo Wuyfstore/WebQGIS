@@ -598,10 +598,13 @@ async function handleSaveFeature() {
     workspace.setStatus("请先开启当前图层编辑后再保存", "warning");
     return;
   }
+  const layerId = activeLayer.value?.id;
+  const featureId = selectedFeatureId.value;
   const saved = await workspace.saveFeature();
   if (saved) {
     editor.loadEditableFeature(saved);
-    editor.refreshLayer(activeLayer.value?.id);
+    editor.markFeatureCovered(layerId, saved.id ?? featureId);
+    editor.refreshLayer(layerId);
   }
 }
 
