@@ -42,9 +42,52 @@ export type AttributeTableQuery = {
   limit: number;
   offset: number;
   search: string;
+  ids?: string[];
   sort?: string;
   order: "asc" | "desc";
 };
+
+export type LayerSourceType = "postgis" | "xyz" | "wms" | "wmts";
+
+export type WebLayerSource =
+  | {
+      type: "xyz";
+      urlTemplate: string;
+      attributions?: string;
+      minZoom?: number;
+      maxZoom?: number;
+    }
+  | {
+      type: "wms";
+      url: string;
+      layers: string;
+      styles?: string;
+      format?: string;
+      version?: string;
+      transparent?: boolean;
+      params?: Record<string, string>;
+    }
+  | {
+      type: "wmts";
+      url: string;
+      layer: string;
+      matrixSet: string;
+      style?: string;
+      format?: string;
+    };
+
+export type WebServiceConnection = {
+  id: string;
+  type: Exclude<LayerSourceType, "postgis">;
+  name: string;
+  url: string;
+  layerName?: string;
+  style?: string;
+  format?: string;
+  matrixSet?: string;
+};
+
+export type WebServiceConnectionPayload = Omit<WebServiceConnection, "id">;
 
 export type FieldMeta = {
   name: string;
@@ -75,6 +118,10 @@ export type Datasource = Omit<DatasourceForm, "password"> & {
 export type LayerRegistration = {
   id: string;
   datasourceId: string;
+  sourceType?: LayerSourceType;
+  displayName?: string;
+  serviceConnectionId?: string;
+  webSource?: WebLayerSource;
   schema: string;
   table: string;
   geometryColumn: string;

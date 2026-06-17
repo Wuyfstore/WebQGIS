@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Close } from "@element-plus/icons-vue";
 import { useDraggable, useSorted } from "@vueuse/core";
-import { computed, shallowRef, useTemplateRef } from "vue";
+import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import type { AttributeCalculationPayload, AttributeTableQuery, FeatureSummary, FieldMeta, LayerRegistration, SqlQueryResult } from "../../types/gis";
 
 const props = defineProps<{
@@ -22,11 +22,17 @@ const emit = defineEmits<{
 
 type FieldSortKey = "name" | "type" | "nullable" | "defaultValue" | "editable";
 type SortDirection = "asc" | "desc";
-type ActiveTab = "records" | "fields" | "calculator" | "sql";
+type ActiveTab = "records" | "fields";
 
 const panelRef = useTemplateRef<HTMLElement>("panelRef");
 const handleRef = useTemplateRef<HTMLElement>("handleRef");
+const calculatorPanelRef = useTemplateRef<HTMLElement>("calculatorPanelRef");
+const calculatorHandleRef = useTemplateRef<HTMLElement>("calculatorHandleRef");
+const sqlPanelRef = useTemplateRef<HTMLElement>("sqlPanelRef");
+const sqlHandleRef = useTemplateRef<HTMLElement>("sqlHandleRef");
 const activeTab = shallowRef<ActiveTab>("records");
+const isCalculatorOpen = shallowRef(false);
+const isSqlOpen = shallowRef(false);
 const fieldSearch = shallowRef("");
 const recordSearchDraft = shallowRef("");
 const sortKey = shallowRef<FieldSortKey>("name");
@@ -69,12 +75,32 @@ const { style: draggableStyle } = useDraggable(panelRef, {
   initialValue: { x: 420, y: 420 },
   preventDefault: true
 });
+const { style: calculatorDraggableStyle } = useDraggable(calculatorPanelRef, {
+  handle: calculatorHandleRef,
+  initialValue: { x: 520, y: 150 },
+  preventDefault: true
+});
+const { style: sqlDraggableStyle } = useDraggable(sqlPanelRef, {
+  handle: sqlHandleRef,
+  initialValue: { x: 560, y: 190 },
+  preventDefault: true
+});
 
 const layerLabel = computed(() => `${props.layer.schema}.${props.layer.table}`);
 const normalizedFieldSearch = computed(() => fieldSearch.value.trim().toLowerCase());
 const propertyFields = computed(() => props.layer.fields.filter((field) => field.name !== props.layer.geometryColumn));
 const editablePropertyFields = computed(() => propertyFields.value.filter((field) => field.editable));
 const displayColumns = computed(() => propertyFields.value.slice(0, 12));
+const recordColumns = computed(() => props.sqlResult?.columns ?? [props.layer.primaryKey ?? "id", ...displayColumns.value.map((field) => field.name)]);
+const recordRows = computed(() => (
+  props.sqlResult
+    ? props.sqlResult.rows
+    : props.features.map((feature) => ({
+        [props.layer.primaryKey ?? "id"]: feature.id,
+        ...feature.properties
+      }))
+));
+const isSqlTable = computed(() => Boolean(props.sqlResult));
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.query.limit)));
 const currentPage = computed(() => Math.floor(props.query.offset / props.query.limit) + 1);
 const featureLimitLabel = computed(() => (
@@ -120,8 +146,11 @@ const fieldCountLabel = computed(() => (
     : `${props.layer.fields.length} 个字段`
 ));
 const recordCountLabel = computed(() => `${props.features.length}/${props.total} 条记录`);
+const displayedRecordCountLabel = computed(() => (
+  props.sqlResult ? `${props.sqlResult.rows.length} 条 SQL 记录` : recordCountLabel.value
+));
 const emptyFieldLabel = computed(() => (props.layer.fields.length === 0 ? "暂无字段" : "无匹配字段"));
-const emptyRecordLabel = computed(() => (props.features.length === 0 ? "暂无属性记录" : "无匹配记录"));
+const emptyRecordLabel = computed(() => (recordRows.value.length === 0 ? (props.sqlResult ? "SQL 查询无结果" : "暂无属性记录") : "无匹配记录"));
 const calculatorPreview = computed(() => {
   const targetField = calculatorTargetField.value || editablePropertyFields.value[0]?.name || "未选择字段";
   const expression = calculatorExpression.value.trim() || "未填写表达式";
@@ -150,6 +179,7 @@ function submitCalculation() {
     expression: calculatorExpression.value.trim(),
     where: calculatorWhere.value.trim() || undefined
   });
+  isCalculatorOpen.value = false;
 }
 
 function submitSqlQuery() {
@@ -160,6 +190,8 @@ function submitSqlQuery() {
     sql: sqlDraft.value.trim(),
     limit: sqlLimit.value
   });
+  activeTab.value = "records";
+  isSqlOpen.value = false;
 }
 
 function insertExpressionToken(token: string) {
@@ -173,7 +205,7 @@ function insertFieldExpression(field: FieldMeta) {
 }
 
 function columnStyle(column: string) {
-  const width = columnWidths.value[column] ?? (column === "__id" ? 96 : 136);
+  const width = columnWidths.value[column] ?? (column === (props.layer.primaryKey ?? "id") ? 96 : 136);
   return {
     width: `${width}px`,
     minWidth: `${width}px`
@@ -206,8 +238,24 @@ function setSort(key: FieldSortKey) {
 function setRecordSearch() {
   emit("query", {
     search: recordSearchDraft.value.trim(),
+    ids: undefined,
     offset: 0
   });
+}
+
+function showOrdinaryRecords() {
+  emit("query", {
+    offset: 0,
+    ids: undefined
+  });
+}
+
+function openCalculator() {
+  isCalculatorOpen.value = true;
+}
+
+function openSqlDialog() {
+  isSqlOpen.value = true;
 }
 
 function setPageSize(event: Event) {
@@ -299,6 +347,40 @@ function valueLabel(value: unknown) {
 function boolLabel(value: boolean) {
   return value ? "是" : "否";
 }
+
+function csvCell(value: unknown) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  const escaped = text.replace(/"/g, "\"\"");
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function downloadCsv() {
+  const headers = recordColumns.value;
+  const rows = recordRows.value.map((row) => headers.map((column) => row[column]));
+  const csv = [
+    headers.map(csvCell).join(","),
+    ...rows.map((row) => row.map(csvCell).join(","))
+  ].join("\r\n");
+  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${props.layer.schema}.${props.layer.table}-attributes-${timestamp}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+watch(
+  () => props.sqlResult,
+  (result) => {
+    if (result) {
+      activeTab.value = "records";
+    }
+  }
+);
 </script>
 
 <template>
@@ -379,22 +461,16 @@ function boolLabel(value: boolean) {
         字段结构
       </button>
       <button
-        class="attribute-table__tab focus-ring"
-        :class="{ 'attribute-table__tab--active': activeTab === 'calculator' }"
+        class="attribute-table__tool-launch focus-ring"
         type="button"
-        role="tab"
-        :aria-selected="activeTab === 'calculator'"
-        @click="activeTab = 'calculator'"
+        @click="openCalculator"
       >
-        属性计算器
+        字段计算器
       </button>
       <button
-        class="attribute-table__tab focus-ring"
-        :class="{ 'attribute-table__tab--active': activeTab === 'sql' }"
+        class="attribute-table__tool-launch focus-ring"
         type="button"
-        role="tab"
-        :aria-selected="activeTab === 'sql'"
-        @click="activeTab = 'sql'"
+        @click="openSqlDialog"
       >
         SQL 查询
       </button>
@@ -416,7 +492,14 @@ function boolLabel(value: boolean) {
         <button class="attribute-table__pager-button focus-ring" :disabled="busy" type="button" @click="setRecordSearch">
           查询
         </button>
-        <label class="attribute-table__page-size">
+        <button class="attribute-table__pager-button focus-ring" :disabled="recordRows.length === 0" type="button" @click="downloadCsv">
+          下载 CSV
+        </button>
+        <button v-if="isSqlTable" class="attribute-table__pager-button focus-ring" :disabled="busy" type="button" @click="showOrdinaryRecords">
+          返回属性数据
+        </button>
+        <span v-if="isSqlTable" class="attribute-table__sql-badge">SQL 查询结果 · {{ displayedRecordCountLabel }}</span>
+        <label v-if="!isSqlTable" class="attribute-table__page-size">
           <span>每页</span>
           <select class="attribute-table__page-select focus-ring" :value="query.limit" :disabled="busy" @change="setPageSize">
             <option :value="50">50</option>
@@ -424,7 +507,7 @@ function boolLabel(value: boolean) {
             <option :value="200">200</option>
           </select>
         </label>
-        <div class="attribute-table__pager" aria-label="属性表分页">
+        <div v-if="!isSqlTable" class="attribute-table__pager" aria-label="属性表分页">
           <button class="attribute-table__pager-button focus-ring" :disabled="!canGoPrevious" type="button" @click="goPage(-1)">
             上一页
           </button>
@@ -439,31 +522,25 @@ function boolLabel(value: boolean) {
         <table class="attribute-table__table">
           <thead>
             <tr>
-              <th class="attribute-table__id-col" scope="col" :style="columnStyle('__id')">
-                <button class="attribute-table__record-sort focus-ring" type="button" @click="setServerSort(layer.primaryKey ?? 'id')">
-                  {{ layer.primaryKey ?? "id" }}
+              <th v-for="column in recordColumns" :key="column" scope="col" :style="columnStyle(column)">
+                <button v-if="!isSqlTable" class="attribute-table__record-sort focus-ring" type="button" @click="setServerSort(column)">
+                  {{ column }}
                 </button>
-                <span class="attribute-table__resize-handle" @pointerdown.prevent="startColumnResize($event, '__id')"></span>
-              </th>
-              <th v-for="field in displayColumns" :key="field.name" scope="col" :style="columnStyle(field.name)">
-                <button class="attribute-table__record-sort focus-ring" type="button" @click="setServerSort(field.name)">
-                  {{ field.name }}
-                </button>
-                <span class="attribute-table__resize-handle" @pointerdown.prevent="startColumnResize($event, field.name)"></span>
+                <span v-else class="attribute-table__record-heading">{{ column }}</span>
+                <span class="attribute-table__resize-handle" @pointerdown.prevent="startColumnResize($event, column)"></span>
               </th>
             </tr>
           </thead>
-          <tbody v-if="features.length > 0">
-            <tr v-for="feature in features" :key="String(feature.id ?? JSON.stringify(feature.properties))">
-              <th scope="row">{{ valueLabel(feature.id) }}</th>
-              <td v-for="field in displayColumns" :key="field.name">
-                {{ valueLabel(feature.properties[field.name]) }}
+          <tbody v-if="recordRows.length > 0">
+            <tr v-for="(row, rowIndex) in recordRows" :key="String(row[layer.primaryKey ?? 'id'] ?? rowIndex)">
+              <td v-for="column in recordColumns" :key="column">
+                {{ valueLabel(row[column]) }}
               </td>
             </tr>
           </tbody>
           <tbody v-else>
             <tr>
-              <td class="attribute-table__empty" :colspan="displayColumns.length + 1">{{ emptyRecordLabel }}</td>
+              <td class="attribute-table__empty" :colspan="Math.max(1, recordColumns.length)">{{ emptyRecordLabel }}</td>
             </tr>
           </tbody>
         </table>
@@ -519,8 +596,24 @@ function boolLabel(value: boolean) {
       </div>
     </template>
 
-    <template v-else-if="activeTab === 'calculator'">
-      <section class="attribute-table__calculator" aria-label="属性计算器">
+    </section>
+
+    <section
+      v-if="isCalculatorOpen"
+      ref="calculatorPanelRef"
+      class="attribute-table__floating-tool attribute-table__floating-tool--calculator"
+      :style="calculatorDraggableStyle"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="attribute-calculator-title"
+    >
+      <header ref="calculatorHandleRef" class="attribute-table__tool-header">
+        <h3 id="attribute-calculator-title" class="attribute-table__tool-title">字段计算器 - {{ layerLabel }}</h3>
+        <button class="attribute-table__close focus-ring" type="button" aria-label="关闭字段计算器" @click="isCalculatorOpen = false">
+          <Close class="attribute-table__close-icon" aria-hidden="true" />
+        </button>
+      </header>
+      <section class="attribute-table__calculator" aria-label="字段计算器">
         <aside class="attribute-table__calculator-browser" aria-label="字段和函数">
           <section class="attribute-table__calculator-group">
             <h3 class="attribute-table__calculator-heading">字段和值</h3>
@@ -605,9 +698,23 @@ function boolLabel(value: boolean) {
           </p>
         </aside>
       </section>
-    </template>
+    </section>
 
-    <template v-else>
+    <section
+      v-if="isSqlOpen"
+      ref="sqlPanelRef"
+      class="attribute-table__floating-tool attribute-table__floating-tool--sql"
+      :style="sqlDraggableStyle"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="attribute-sql-title"
+    >
+      <header ref="sqlHandleRef" class="attribute-table__tool-header">
+        <h3 id="attribute-sql-title" class="attribute-table__tool-title">SQL 查询 - {{ layerLabel }}</h3>
+        <button class="attribute-table__close focus-ring" type="button" aria-label="关闭 SQL 查询" @click="isSqlOpen = false">
+          <Close class="attribute-table__close-icon" aria-hidden="true" />
+        </button>
+      </header>
       <section class="attribute-table__tool-panel" aria-label="SQL 查询">
         <label class="attribute-table__tool-field attribute-table__tool-field--wide">
           <span>SQL</span>
@@ -633,30 +740,6 @@ function boolLabel(value: boolean) {
           仅允许当前图层的单条 SELECT；推荐使用 {layer} 代表当前表，也支持当前表名占位符 {schema.table}；服务端强制只读事务和 LIMIT。
         </p>
       </section>
-      <div v-if="sqlResult" class="attribute-table__table-wrap">
-        <table class="attribute-table__table">
-          <thead>
-            <tr>
-              <th v-for="column in sqlResult.columns" :key="column" scope="col">
-                {{ column }}
-              </th>
-            </tr>
-          </thead>
-          <tbody v-if="sqlResult.rows.length > 0">
-            <tr v-for="(row, rowIndex) in sqlResult.rows" :key="rowIndex">
-              <td v-for="column in sqlResult.columns" :key="column">
-                {{ valueLabel(row[column]) }}
-              </td>
-            </tr>
-          </tbody>
-          <tbody v-else>
-            <tr>
-              <td class="attribute-table__empty" :colspan="Math.max(1, sqlResult.columns.length)">SQL 查询无结果</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </template>
     </section>
   </Teleport>
 </template>
@@ -785,13 +868,15 @@ function boolLabel(value: boolean) {
 
 .attribute-table__tabs {
   display: flex;
+  align-items: center;
   gap: 4px;
   border-bottom: 1px solid #b6b6b6;
   background: #e2e2e2;
   padding: 5px 8px;
 }
 
-.attribute-table__tab {
+.attribute-table__tab,
+.attribute-table__tool-launch {
   min-height: 25px;
   border: 1px solid #b6b6b6;
   background: #d7d7d7;
@@ -799,6 +884,17 @@ function boolLabel(value: boolean) {
   padding: 3px 14px;
   font-size: 12px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+.attribute-table__tool-launch {
+  margin-left: 4px;
+  border-color: #9f9f9f;
+  background: #eeeeee;
+  color: var(--qgis-text);
+}
+
+.attribute-table__tool-launch:first-of-type {
+  margin-left: auto;
 }
 
 .attribute-table__tab--active {
@@ -877,6 +973,15 @@ function boolLabel(value: boolean) {
   white-space: nowrap;
 }
 
+.attribute-table__sql-badge {
+  border: 1px solid #9cb0c7;
+  background: #e8f0f7;
+  color: #2f5f8f;
+  padding: 3px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .attribute-table__table-wrap {
   max-height: 300px;
   overflow: auto;
@@ -927,6 +1032,15 @@ function boolLabel(value: boolean) {
   text-align: left;
   font: inherit;
   font-weight: 600;
+}
+
+.attribute-table__record-heading {
+  display: block;
+  min-height: 28px;
+  overflow: hidden;
+  padding: 6px 18px 5px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attribute-table__record-sort:hover {
@@ -985,6 +1099,46 @@ function boolLabel(value: boolean) {
   background: #f5f5f5;
 }
 
+.attribute-table__floating-tool {
+  position: fixed;
+  z-index: calc(var(--qgis-z-floating-panel) + 1);
+  border: 1px solid #8d8d8d;
+  background: var(--qgis-pane);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.24);
+  overflow: hidden;
+}
+
+.attribute-table__floating-tool--calculator {
+  width: min(940px, calc(100vw - 32px));
+}
+
+.attribute-table__floating-tool--sql {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.attribute-table__tool-header {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #a5a5a5;
+  background: var(--qgis-dock-title);
+  cursor: move;
+  padding: 0 8px 0 12px;
+  user-select: none;
+}
+
+.attribute-table__tool-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--qgis-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .attribute-table__tool-field {
   display: grid;
   gap: 5px;
@@ -1025,7 +1179,8 @@ function boolLabel(value: boolean) {
 .attribute-table__calculator {
   display: grid;
   grid-template-columns: 220px minmax(260px, 1fr) 230px;
-  min-height: 360px;
+  min-height: 340px;
+  max-height: min(560px, calc(100vh - 96px));
   background: #f5f5f5;
 }
 
@@ -1038,7 +1193,7 @@ function boolLabel(value: boolean) {
 }
 
 .attribute-table__calculator-browser {
-  max-height: 390px;
+  max-height: min(526px, calc(100vh - 130px));
   overflow: auto;
   background: #eeeeee;
 }
@@ -1180,6 +1335,10 @@ function boolLabel(value: boolean) {
   .attribute-table__controls {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .attribute-table__tool-launch:first-of-type {
+    margin-left: 0;
   }
 
   .attribute-table__limit-note {

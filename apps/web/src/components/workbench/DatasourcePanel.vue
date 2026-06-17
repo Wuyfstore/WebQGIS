@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, shallowRef, watch } from "vue";
 import { Connection, FolderOpened, Plus, Refresh, Setting } from "@element-plus/icons-vue";
-import type { Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
+import type { Datasource, DatasourceForm, LayerRegistration, WebServiceConnection, WebServiceConnectionPayload } from "../../types/gis";
 import { writeLayerDragPayload } from "../../utils/layerDrag";
 
 const props = withDefaults(defineProps<{
   datasources: Datasource[];
   availableLayers: LayerRegistration[];
+  webServiceConnections: WebServiceConnection[];
   loadedLayerIds: Set<string>;
   busy: boolean;
   connectionDialogRequestKey: number;
 }>(), {
   availableLayers: () => [],
+  webServiceConnections: () => [],
   loadedLayerIds: () => new Set<string>()
 });
 
@@ -21,14 +23,28 @@ const emit = defineEmits<{
   save: [];
   scan: [datasourceId: string];
   loadLayer: [layerId: string];
+  saveWebServiceConnection: [payload: WebServiceConnectionPayload];
   layerDragStart: [layerId: string];
   layerDragEnd: [];
 }>();
 
 const isPostgresExpanded = shallowRef(true);
+const isXyzExpanded = shallowRef(true);
+const isWmsExpanded = shallowRef(false);
 const isConnectionDialogOpen = shallowRef(false);
+const isWebConnectionDialogOpen = shallowRef(false);
+const webConnectionType = shallowRef<"xyz" | "wms" | "wmts">("xyz");
+const webConnectionForm = reactive({
+  name: "",
+  url: "",
+  layerName: "",
+  style: "",
+  format: "image/png",
+  matrixSet: "EPSG:3857"
+});
 const contextMenu = shallowRef({
   visible: false,
+  target: "postgres" as "postgres" | "xyz" | "wms",
   x: 0,
   y: 0
 });
@@ -37,7 +53,13 @@ const contextMenuStyle = computed(() => ({
   top: `${contextMenu.value.y}px`
 }));
 const datasourceCountLabel = computed(() => `${props.datasources.length} 个连接`);
+const xyzLayers = computed(() => props.availableLayers.filter((layer) => layer.sourceType === "xyz"));
+const wmsLayers = computed(() => props.availableLayers.filter((layer) => layer.sourceType === "wms" || layer.sourceType === "wmts"));
+const xyzCountLabel = computed(() => `${xyzLayers.value.length} 个连接`);
+const wmsCountLabel = computed(() => `${wmsLayers.value.length} 个图层`);
 const postgresDisclosure = computed(() => (isPostgresExpanded.value ? "▾" : "▸"));
+const xyzDisclosure = computed(() => (isXyzExpanded.value ? "▾" : "▸"));
+const wmsDisclosure = computed(() => (isWmsExpanded.value ? "▾" : "▸"));
 const expandedDatasourceIds = shallowRef(new Set<string>());
 const scannedDatasourceIds = shallowRef(new Set<string>());
 
@@ -57,10 +79,11 @@ function shouldShowDatasourceEmpty(datasourceId: string) {
   return !props.busy && scannedDatasourceIds.value.has(datasourceId) && datasourceLayers(datasourceId).length === 0;
 }
 
-function openContextMenu(event: MouseEvent) {
+function openContextMenu(event: MouseEvent, target: "postgres" | "xyz" | "wms" = "postgres") {
   event.preventDefault();
   contextMenu.value = {
     visible: true,
+    target,
     x: Math.min(event.clientX, window.innerWidth - 186),
     y: Math.min(event.clientY, window.innerHeight - 96)
   };
@@ -79,8 +102,42 @@ function openConnectionDialog() {
   isConnectionDialogOpen.value = true;
 }
 
+function openContextConnectionDialog() {
+  if (contextMenu.value.target === "postgres") {
+    openConnectionDialog();
+    return;
+  }
+  openWebConnectionDialog(contextMenu.value.target === "xyz" ? "xyz" : "wms");
+}
+
 function togglePostgresNode() {
   isPostgresExpanded.value = !isPostgresExpanded.value;
+}
+
+function toggleXyzNode() {
+  isXyzExpanded.value = !isXyzExpanded.value;
+}
+
+function toggleWmsNode() {
+  isWmsExpanded.value = !isWmsExpanded.value;
+}
+
+function openWebConnectionDialog(type: "xyz" | "wms" | "wmts") {
+  closeContextMenu();
+  webConnectionType.value = type;
+  Object.assign(webConnectionForm, {
+    name: type === "xyz" ? "自定义 XYZ" : type === "wms" ? "自定义 WMS" : "自定义 WMTS",
+    url: "",
+    layerName: "",
+    style: "",
+    format: "image/png",
+    matrixSet: "EPSG:3857"
+  });
+  isWebConnectionDialogOpen.value = true;
+}
+
+function closeWebConnectionDialog() {
+  isWebConnectionDialogOpen.value = false;
 }
 
 function toggleDatasourceNode(datasourceId: string) {
@@ -105,6 +162,22 @@ function saveConnection() {
   emit("save");
 }
 
+function saveWebConnection() {
+  if (!webConnectionForm.name.trim() || !webConnectionForm.url.trim()) {
+    return;
+  }
+  emit("saveWebServiceConnection", {
+    type: webConnectionType.value,
+    name: webConnectionForm.name.trim(),
+    url: webConnectionForm.url.trim(),
+    layerName: webConnectionForm.layerName.trim() || undefined,
+    style: webConnectionForm.style.trim() || undefined,
+    format: webConnectionForm.format.trim() || undefined,
+    matrixSet: webConnectionForm.matrixSet.trim() || undefined
+  });
+  closeWebConnectionDialog();
+}
+
 function refreshFirstDatasource() {
   const datasource = props.datasources[0];
   if (datasource) {
@@ -115,6 +188,10 @@ function refreshFirstDatasource() {
 function startLayerDrag(event: DragEvent, layerId: string) {
   writeLayerDragPayload(event, layerId);
   emit("layerDragStart", layerId);
+}
+
+function layerLabel(layer: LayerRegistration) {
+  return layer.displayName ?? `${layer.schema}.${layer.table}`;
 }
 
 onBeforeUnmount(() => {
@@ -144,7 +221,7 @@ watch(
         class="datasource-panel__tree-node datasource-panel__tree-node--root focus-ring"
         type="button"
         :title="isPostgresExpanded ? '折叠 PostgreSQL 连接' : '展开 PostgreSQL 连接'"
-        @contextmenu="openContextMenu"
+        @contextmenu="openContextMenu($event, 'postgres')"
         @click="togglePostgresNode"
       >
         <FolderOpened class="datasource-panel__node-icon" />
@@ -201,22 +278,149 @@ watch(
           暂无连接。右键 PostgreSQL 新建 PostGIS 连接。
         </div>
       </template>
+
+      <button
+        class="datasource-panel__tree-node datasource-panel__tree-node--root focus-ring"
+        type="button"
+        :title="isXyzExpanded ? '折叠 XYZ Tiles' : '展开 XYZ Tiles'"
+        @contextmenu="openContextMenu($event, 'xyz')"
+        @click="toggleXyzNode"
+      >
+        <FolderOpened class="datasource-panel__node-icon" />
+        <span>{{ xyzDisclosure }} XYZ Tiles</span>
+        <span class="datasource-panel__root-meta">{{ xyzCountLabel }}</span>
+      </button>
+      <div v-if="isXyzExpanded" class="datasource-panel__layer-list">
+        <button
+          v-for="layer in xyzLayers"
+          :key="layer.id"
+          class="datasource-panel__tree-node datasource-panel__tree-node--layer datasource-panel__tree-node--web focus-ring"
+          :class="{ 'datasource-panel__tree-node--loaded': loadedLayerIds.has(layer.id) }"
+          :draggable="!busy"
+          type="button"
+          @dblclick="emit('loadLayer', layer.id)"
+          @dragstart="startLayerDrag($event, layer.id)"
+          @dragend="emit('layerDragEnd')"
+        >
+          <span class="datasource-panel__raster-icon" aria-hidden="true"></span>
+          <span class="datasource-panel__layer-main">
+            <span class="datasource-panel__layer-name">{{ layerLabel(layer) }}</span>
+            <span class="datasource-panel__layer-meta">XYZ · 栅格瓦片</span>
+          </span>
+          <span class="datasource-panel__layer-tag">{{ loadedLayerIds.has(layer.id) ? "已加载" : "只读" }}</span>
+        </button>
+        <div v-if="xyzLayers.length === 0" class="datasource-panel__tree-empty">
+          右键 XYZ Tiles 新建连接。
+        </div>
+      </div>
+
+      <button
+        class="datasource-panel__tree-node datasource-panel__tree-node--root focus-ring"
+        type="button"
+        :title="isWmsExpanded ? '折叠 WMS/WMTS' : '展开 WMS/WMTS'"
+        @contextmenu="openContextMenu($event, 'wms')"
+        @click="toggleWmsNode"
+      >
+        <FolderOpened class="datasource-panel__node-icon" />
+        <span>{{ wmsDisclosure }} WMS/WMTS</span>
+        <span class="datasource-panel__root-meta">{{ wmsCountLabel }}</span>
+      </button>
+      <div v-if="isWmsExpanded" class="datasource-panel__layer-list">
+        <button
+          v-for="layer in wmsLayers"
+          :key="layer.id"
+          class="datasource-panel__tree-node datasource-panel__tree-node--layer datasource-panel__tree-node--web focus-ring"
+          :class="{ 'datasource-panel__tree-node--loaded': loadedLayerIds.has(layer.id) }"
+          :draggable="!busy"
+          type="button"
+          @dblclick="emit('loadLayer', layer.id)"
+          @dragstart="startLayerDrag($event, layer.id)"
+          @dragend="emit('layerDragEnd')"
+        >
+          <span class="datasource-panel__raster-icon" aria-hidden="true"></span>
+          <span class="datasource-panel__layer-main">
+            <span class="datasource-panel__layer-name">{{ layerLabel(layer) }}</span>
+            <span class="datasource-panel__layer-meta">{{ layer.sourceType?.toUpperCase() }} · OGC 栅格服务</span>
+          </span>
+          <span class="datasource-panel__layer-tag">{{ loadedLayerIds.has(layer.id) ? "已加载" : "只读" }}</span>
+        </button>
+        <div v-if="wmsLayers.length === 0" class="datasource-panel__tree-empty">
+          右键 WMS/WMTS 新建服务连接。
+        </div>
+      </div>
     </div>
 
     <Teleport to="body">
       <div v-if="contextMenu.visible" class="datasource-panel__context-menu" :style="contextMenuStyle" role="menu">
-        <button class="datasource-panel__context-item" type="button" role="menuitem" @click="openConnectionDialog">
+        <button class="datasource-panel__context-item" type="button" role="menuitem" @click="openContextConnectionDialog">
           <Plus class="datasource-panel__context-icon" />
           新建连接...
         </button>
-        <button class="datasource-panel__context-item" :disabled="busy || datasources.length === 0" type="button" role="menuitem" @click="refreshFirstDatasource">
+        <button
+          v-if="contextMenu.target === 'wms'"
+          class="datasource-panel__context-item"
+          type="button"
+          role="menuitem"
+          @click="openWebConnectionDialog('wmts')"
+        >
+          <Plus class="datasource-panel__context-icon" />
+          新建 WMTS 连接...
+        </button>
+        <button class="datasource-panel__context-item" :disabled="busy || (contextMenu.target === 'postgres' && datasources.length === 0)" type="button" role="menuitem" @click="refreshFirstDatasource">
           <Refresh class="datasource-panel__context-icon" />
           刷新
         </button>
-        <button class="datasource-panel__context-item" type="button" role="menuitem" @click="openConnectionDialog">
+        <button class="datasource-panel__context-item" type="button" role="menuitem" @click="openContextConnectionDialog">
           <Setting class="datasource-panel__context-icon" />
           连接管理
         </button>
+      </div>
+
+      <div v-if="isWebConnectionDialogOpen" class="datasource-panel__dialog-backdrop">
+        <form class="datasource-panel__dialog" :aria-label="`${webConnectionType.toUpperCase()} 连接`" @submit.prevent="saveWebConnection">
+          <header class="datasource-panel__dialog-header">
+            <h3 class="datasource-panel__dialog-title">创建新的 {{ webConnectionType.toUpperCase() }} 连接</h3>
+            <button class="datasource-panel__dialog-close focus-ring" type="button" aria-label="关闭网络服务弹窗" @click="closeWebConnectionDialog">
+              ×
+            </button>
+          </header>
+
+          <section class="datasource-panel__dialog-body">
+            <label class="datasource-panel__field datasource-panel__field--wide">
+              <span class="datasource-panel__label">名称</span>
+              <input v-model="webConnectionForm.name" class="datasource-panel__input focus-ring" placeholder="OSM / 地理信息公共服务" />
+            </label>
+            <label class="datasource-panel__field datasource-panel__field--wide">
+              <span class="datasource-panel__label">URL</span>
+              <input v-model="webConnectionForm.url" class="datasource-panel__input focus-ring" placeholder="https://.../{z}/{x}/{y}.png 或 WMS GetMap 地址" />
+            </label>
+            <label v-if="webConnectionType !== 'xyz'" class="datasource-panel__field">
+              <span class="datasource-panel__label">图层名</span>
+              <input v-model="webConnectionForm.layerName" class="datasource-panel__input focus-ring" placeholder="workspace:layer" />
+            </label>
+            <label v-if="webConnectionType !== 'xyz'" class="datasource-panel__field">
+              <span class="datasource-panel__label">样式</span>
+              <input v-model="webConnectionForm.style" class="datasource-panel__input focus-ring" placeholder="default" />
+            </label>
+            <label v-if="webConnectionType !== 'xyz'" class="datasource-panel__field">
+              <span class="datasource-panel__label">格式</span>
+              <input v-model="webConnectionForm.format" class="datasource-panel__input focus-ring" placeholder="image/png" />
+            </label>
+            <label v-if="webConnectionType === 'wmts'" class="datasource-panel__field">
+              <span class="datasource-panel__label">TileMatrixSet</span>
+              <input v-model="webConnectionForm.matrixSet" class="datasource-panel__input focus-ring" placeholder="EPSG:3857" />
+            </label>
+          </section>
+
+          <footer class="datasource-panel__dialog-actions">
+            <button class="datasource-panel__dialog-button focus-ring" type="button" @click="closeWebConnectionDialog">
+              取消
+            </button>
+            <button class="datasource-panel__dialog-button datasource-panel__dialog-button--primary focus-ring" :disabled="busy" type="submit">
+              保存并添加
+            </button>
+          </footer>
+        </form>
       </div>
 
       <div v-if="isConnectionDialogOpen" class="datasource-panel__dialog-backdrop">
@@ -420,6 +624,10 @@ watch(
   cursor: grab;
 }
 
+.datasource-panel__tree-node--web {
+  padding-left: 24px;
+}
+
 .datasource-panel__tree-node--layer:active {
   cursor: grabbing;
 }
@@ -444,6 +652,16 @@ watch(
   height: 11px;
   border: 1px solid #7a7a7a;
   background: #d7e5cf;
+}
+
+.datasource-panel__raster-icon {
+  width: 12px;
+  height: 12px;
+  border: 1px solid #7a7a7a;
+  background:
+    linear-gradient(135deg, #c7d8ea 25%, transparent 25%) 0 0 / 8px 8px,
+    linear-gradient(135deg, transparent 75%, #dfe8d1 75%) 0 0 / 8px 8px,
+    #f4f4f4;
 }
 
 .datasource-panel__source-name,

@@ -7,14 +7,20 @@ import Feature from "ol/Feature";
 import GeoJSON from "ol/format/GeoJSON";
 import MVT from "ol/format/MVT";
 import Graticule from "ol/layer/Graticule";
-import TileLayer from "ol/layer/VectorTile";
+import RasterTileLayer from "ol/layer/Tile";
+import VectorTileLayer from "ol/layer/VectorTile";
 import VectorLayer from "ol/layer/Vector";
+import TileWMS from "ol/source/TileWMS";
+import WMTS from "ol/source/WMTS";
 import VectorSource from "ol/source/Vector";
 import VectorTileSource from "ol/source/VectorTile";
+import XYZ from "ol/source/XYZ";
+import WMTSTileGrid from "ol/tilegrid/WMTS";
 import { Modify, Snap, Draw } from "ol/interaction";
 import DragBox from "ol/interaction/DragBox";
+import { mouseActionButton, noModifierKeys, primaryAction } from "ol/events/condition";
 import { unByKey } from "ol/Observable";
-import { intersects } from "ol/extent";
+import { getWidth, intersects } from "ol/extent";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { fromLonLat, get as getProjection, getPointResolution, transform, transformExtent } from "ol/proj";
 import type { Geometry } from "ol/geom";
@@ -112,6 +118,10 @@ export function featureIntersectsSelectionGeometry(featureGeometry: ExtentGeomet
   return intersects(featureGeometry.getExtent(), selectionGeometry.getExtent());
 }
 
+export function uniqueFeatureIds(featureIds: Array<string | number | null | undefined>) {
+  return [...new Set(featureIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+}
+
 function toCoordinatePair(coordinate: number[]): [number, number] {
   return [coordinate[0] ?? 0, coordinate[1] ?? 0];
 }
@@ -127,9 +137,14 @@ type UseOpenLayersEditorOptions = {
   coordinatePrecision?: Ref<number>;
   coordinateAxisOrder?: Ref<CoordinateAxisOrder>;
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
+  openAttributeTableForFeatureIds?: (layerId: string, featureIds: string[]) => Promise<void>;
   clearSelection?: () => void;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
 };
+
+type MountedMapLayer =
+  | VectorTileLayer<VectorTileSource>
+  | RasterTileLayer<XYZ | TileWMS | WMTS>;
 
 export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   const map = shallowRef<OlMap | null>(null);
@@ -151,7 +166,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   ));
   const scaleLabel = computed(() => formatScaleLabel(scaleDenominator.value));
   const projectionLabel = computed(() => projectionStatusLabel(options.displayProjection.value));
-  const layerMap = new globalThis.Map<string, TileLayer<VectorTileSource>>();
+  const layerMap = new globalThis.Map<string, MountedMapLayer>();
   const { isRevealed: isDeleteDialogOpen, reveal, confirm, cancel } = useConfirmDialog();
 
   let modifyInteraction: Modify | null = null;
@@ -254,7 +269,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       const mountedLayer = layerMap.get(layer.id);
       mountedLayer?.setVisible(options.visibleLayerIds.value.has(layer.id));
       mountedLayer?.setOpacity(layer.style.opacity);
-      mountedLayer?.setStyle((feature) => layerStyle(layer, feature));
+      if (isVectorTileLayer(mountedLayer)) {
+        mountedLayer.setStyle((feature) => layerStyle(layer, feature));
+      }
     }
     for (const [id, tileLayer] of layerMap) {
       if (!options.layers.value.some((layer) => layer.id === id)) {
@@ -268,7 +285,60 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     if (!map.value || layerMap.has(layer.id)) {
       return;
     }
-    const vectorLayer = new TileLayer({
+    const mountedLayer = createMapLayer(layer);
+    if (!mountedLayer) {
+      options.setStatus(`图层缺少可加载的地图源：${layer.displayName ?? `${layer.schema}.${layer.table}`}`, "warning");
+      return;
+    }
+    layerMap.set(layer.id, mountedLayer);
+    map.value.getLayers().insertAt(Math.max(0, map.value.getLayers().getLength() - 1), mountedLayer);
+  }
+
+  function createMapLayer(layer: LayerRegistration): MountedMapLayer | null {
+    if (layer.sourceType === "xyz" && layer.webSource?.type === "xyz") {
+      return new RasterTileLayer({
+        source: new XYZ({
+          url: layer.webSource.urlTemplate,
+          attributions: layer.webSource.attributions,
+          minZoom: layer.webSource.minZoom,
+          maxZoom: layer.webSource.maxZoom
+        }),
+        opacity: layer.style.opacity
+      });
+    }
+    if (layer.sourceType === "wms" && layer.webSource?.type === "wms") {
+      return new RasterTileLayer({
+        source: new TileWMS({
+          url: layer.webSource.url,
+          params: {
+            LAYERS: layer.webSource.layers,
+            STYLES: layer.webSource.styles ?? "",
+            FORMAT: layer.webSource.format ?? "image/png",
+            TRANSPARENT: layer.webSource.transparent ?? true,
+            VERSION: layer.webSource.version ?? "1.3.0",
+            ...(layer.webSource.params ?? {})
+          },
+          serverType: "geoserver",
+          transition: 0
+        }),
+        opacity: layer.style.opacity
+      });
+    }
+    if (layer.sourceType === "wmts" && layer.webSource?.type === "wmts") {
+      return new RasterTileLayer({
+        source: new WMTS({
+          url: layer.webSource.url,
+          layer: layer.webSource.layer,
+          matrixSet: layer.webSource.matrixSet,
+          style: layer.webSource.style ?? "default",
+          format: layer.webSource.format ?? "image/png",
+          tileGrid: createDefaultWmtsTileGrid(layer.webSource.matrixSet),
+          wrapX: true
+        }),
+        opacity: layer.style.opacity
+      });
+    }
+    return new VectorTileLayer({
       source: new VectorTileSource({
         format: new MVT({ idProperty: layer.primaryKey ?? undefined }),
         url: layer.tileUrl
@@ -276,8 +346,6 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       opacity: layer.style.opacity,
       style: (feature) => layerStyle(layer, feature)
     });
-    layerMap.set(layer.id, vectorLayer);
-    map.value.getLayers().insertAt(Math.max(0, map.value.getLayers().getLength() - 1), vectorLayer);
   }
 
   function layerStyle(layer: LayerRegistration, feature: FeatureLike) {
@@ -306,7 +374,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       return;
     }
     const activeTileLayer = options.activeLayer.value ? layerMap.get(options.activeLayer.value.id) : undefined;
-    const feature = pickFeatureAtPixel(event.pixel, activeTileLayer)
+    const activeVectorLayer = isVectorTileLayer(activeTileLayer) ? activeTileLayer : undefined;
+    const feature = pickFeatureAtPixel(event.pixel, activeVectorLayer)
       ?? pickFeatureAtPixel(event.pixel);
     void handleFeaturePick(feature);
   }
@@ -337,7 +406,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     scaleDenominator.value = estimateScaleDenominator(view.getResolution(), center);
   }
 
-  function pickFeatureAtPixel(pixel: Pixel, preferredLayer?: TileLayer<VectorTileSource>) {
+  function pickFeatureAtPixel(pixel: Pixel, preferredLayer?: VectorTileLayer<VectorTileSource>) {
     return map.value?.forEachFeatureAtPixel(
       pixel,
       (candidate) => candidate,
@@ -370,37 +439,81 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   }
 
   async function selectFeatureInGeometry(selectionGeometry: Geometry) {
-    const feature = findFeatureInSelectionGeometry(selectionGeometry);
-    if (!feature) {
+    const matches = findFeaturesInSelectionGeometry(selectionGeometry);
+    if (matches.length === 0) {
       options.setStatus("选择范围内没有可查询要素", "warning");
       return;
     }
-    await handleFeaturePick(feature);
+    const layerGroups = new globalThis.Map<string, string[]>();
+    for (const { feature, layer } of matches) {
+      if (!layer.queryable) {
+        continue;
+      }
+      const pk = readVectorTileFeaturePk(feature);
+      if (!pk) {
+        continue;
+      }
+      layerGroups.set(layer.id, [...(layerGroups.get(layer.id) ?? []), pk]);
+    }
+    const activeLayerId = options.activeLayer.value?.id;
+    const selectedLayerId = activeLayerId && layerGroups.has(activeLayerId)
+      ? activeLayerId
+      : layerGroups.keys().next().value;
+    if (!selectedLayerId) {
+      options.setStatus("选择范围内要素缺少主键，无法打开属性表", "warning");
+      return;
+    }
+    const ids = uniqueFeatureIds(layerGroups.get(selectedLayerId) ?? []);
+    await options.openAttributeTableForFeatureIds?.(selectedLayerId, ids);
   }
 
-  function findFeatureInSelectionGeometry(selectionGeometry: Geometry) {
+  function findFeaturesInSelectionGeometry(selectionGeometry: Geometry) {
     const activeTileLayer = options.activeLayer.value ? layerMap.get(options.activeLayer.value.id) : undefined;
-    return findFeatureInSelectionGeometryFromLayers(selectionGeometry, activeTileLayer ? [activeTileLayer] : [])
-      ?? findFeatureInSelectionGeometryFromLayers(
-        selectionGeometry,
-        [...layerMap.entries()]
-          .filter(([layerId]) => options.visibleLayerIds.value.has(layerId))
-          .map(([, layer]) => layer)
-      );
+    const orderedLayers: VectorTileLayer<VectorTileSource>[] = [];
+    if (isVectorTileLayer(activeTileLayer)) {
+      orderedLayers.push(activeTileLayer);
+    }
+    for (const [layerId, layer] of layerMap.entries()) {
+      if (options.visibleLayerIds.value.has(layerId) && layer !== activeTileLayer && isVectorTileLayer(layer)) {
+        orderedLayers.push(layer);
+      }
+    }
+    return findFeaturesInSelectionGeometryFromLayers(selectionGeometry, orderedLayers);
   }
 
-  function findFeatureInSelectionGeometryFromLayers(
+  function findFeaturesInSelectionGeometryFromLayers(
     selectionGeometry: Geometry,
-    tileLayers: TileLayer<VectorTileSource>[]
+    tileLayers: VectorTileLayer<VectorTileSource>[]
   ) {
     const selectionExtent = selectionGeometry.getExtent();
+    const matches: { feature: FeatureLike; layer: LayerRegistration }[] = [];
+    const seen = new Set<string>();
     for (const tileLayer of tileLayers) {
+      const matchedLayer = findLayerByMountedLayer(tileLayer);
+      if (!matchedLayer) {
+        continue;
+      }
       const candidates = tileLayer.getFeaturesInExtent(selectionExtent);
-      const matched = candidates.find((feature) => {
-        return featureIntersectsSelectionGeometry(feature.getGeometry(), selectionGeometry);
-      });
-      if (matched) {
-        return matched;
+      for (const [index, feature] of candidates.entries()) {
+        if (!featureIntersectsSelectionGeometry(feature.getGeometry(), selectionGeometry)) {
+          continue;
+        }
+        const pk = readVectorTileFeaturePk(feature);
+        const key = `${matchedLayer.id}:${pk ?? index}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        matches.push({ feature, layer: matchedLayer });
+      }
+    }
+    return matches;
+  }
+
+  function findLayerByMountedLayer(tileLayer: VectorTileLayer<VectorTileSource>) {
+    for (const [layerId, mountedLayer] of layerMap.entries()) {
+      if (mountedLayer === tileLayer) {
+        return options.layers.value.find((layer) => layer.id === layerId);
       }
     }
     return undefined;
@@ -548,7 +661,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       return;
     }
     selectionBoxInteraction = new DragBox({
-      className: "workbench-selection-box"
+      className: "workbench-selection-box",
+      condition: (event) => mouseActionButton(event) && noModifierKeys(event)
     });
     selectionBoxInteraction.on("boxend", () => {
       const geometry = selectionBoxInteraction?.getGeometry();
@@ -567,6 +681,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     selectionDrawInteraction = new Draw({
       source: selectionSketchSource,
       type: "Polygon",
+      condition: (event) => primaryAction(event) && noModifierKeys(event),
       stopClick: true
     });
     selectionDrawInteraction.on("drawend", (event: DrawEvent) => {
@@ -636,7 +751,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   function refreshLayerStyles() {
     for (const tileLayer of layerMap.values()) {
-      tileLayer.changed();
+      if (isVectorTileLayer(tileLayer)) {
+        tileLayer.changed();
+      }
     }
   }
 
@@ -684,4 +801,22 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     confirmDelete: () => confirm(true),
     cancelDelete: () => cancel(false)
   };
+}
+
+function isVectorTileLayer(layer: MountedMapLayer | undefined): layer is VectorTileLayer<VectorTileSource> {
+  return layer instanceof VectorTileLayer;
+}
+
+function createDefaultWmtsTileGrid(matrixSet: string) {
+  const projection = getProjection(matrixSet) ?? getProjection("EPSG:3857");
+  const extent = projection?.getExtent() ?? getProjection("EPSG:3857")!.getExtent();
+  const size = getWidth(extent) / 256;
+  const levels = 20;
+  const matrixIds = Array.from({ length: levels }, (_, zoom) => String(zoom));
+  const resolutions = matrixIds.map((_, zoom) => size / Math.pow(2, zoom));
+  return new WMTSTileGrid({
+    origin: [extent[0], extent[3]],
+    resolutions,
+    matrixIds
+  });
 }

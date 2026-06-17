@@ -10,7 +10,8 @@ import {
   projectLayerExtent,
   projectionStatusLabel,
   readVectorTileFeaturePk,
-  selectionModeStatus
+  selectionModeStatus,
+  uniqueFeatureIds
 } from "./useOpenLayersEditor";
 
 function createFeatureStub(id: string | number | undefined, propertyId: unknown = undefined): Pick<FeatureLike, "get" | "getId"> {
@@ -70,6 +71,10 @@ describe("readVectorTileFeaturePk", () => {
     expect(featureIntersectsSelectionGeometry(inside, selection)).toBe(true);
     expect(featureIntersectsSelectionGeometry(outside, selection)).toBe(false);
     expect(featureIntersectsSelectionGeometry(undefined, selection)).toBe(false);
+  });
+
+  it("deduplicates range selection feature ids before opening the attribute table", () => {
+    expect(uniqueFeatureIds(["1024", "1024", " 1025 ", "", null, undefined, 1026])).toEqual(["1024", "1025", "1026"]);
   });
 
   it("estimates a positive scale denominator from map resolution", () => {

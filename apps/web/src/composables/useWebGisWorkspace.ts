@@ -16,7 +16,9 @@ import type {
   LayerRegistration,
   LayerStylePatch,
   SqlQueryResult,
-  StatusMessage
+  StatusMessage,
+  WebServiceConnection,
+  WebServiceConnectionPayload
 } from "../types/gis";
 
 const defaultDatasourceForm = (): DatasourceForm => ({
@@ -33,7 +35,23 @@ export function useWebGisWorkspace() {
   useTitle("WebQGIS 工作台");
 
   const datasources = shallowRef<Datasource[]>([]);
-  const availableLayers = shallowRef<LayerRegistration[]>([]);
+  const postgisLayers = shallowRef<LayerRegistration[]>([]);
+  const webLayers = shallowRef<LayerRegistration[]>([
+    createWebLayer({
+      id: "web-xyz-openstreetmap",
+      type: "xyz",
+      name: "OpenStreetMap",
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    })
+  ]);
+  const webServiceConnections = shallowRef<WebServiceConnection[]>([
+    {
+      id: "xyz-openstreetmap",
+      type: "xyz",
+      name: "OpenStreetMap",
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    }
+  ]);
   const loadedLayerIds = shallowRef(new Set<string>());
   const activeLayerId = shallowRef("");
   const visibleLayerIds = shallowRef(new Set<string>());
@@ -59,6 +77,7 @@ export function useWebGisWorkspace() {
   const attributeTableLayerId = shallowRef<string | null>(null);
   const datasourceForm = reactive(defaultDatasourceForm());
 
+  const availableLayers = computed(() => [...postgisLayers.value, ...webLayers.value]);
   const layers = computed(() => availableLayers.value.filter((layer) => loadedLayerIds.value.has(layer.id)));
   const activeLayer = computed(() => layers.value.find((layer) => layer.id === activeLayerId.value));
   const editableFields = computed(() => getEditableFields(activeLayer.value));
@@ -173,8 +192,11 @@ export function useWebGisWorkspace() {
         refreshCustomCrsCatalog()
       ]);
       datasources.value = nextDatasources;
-      availableLayers.value = nextAvailableLayers;
-      reconcileLoadedLayers(nextAvailableLayers);
+      postgisLayers.value = nextAvailableLayers.map((layer) => ({
+        ...layer,
+        sourceType: layer.sourceType ?? "postgis"
+      }));
+      reconcileLoadedLayers([...postgisLayers.value, ...webLayers.value]);
       setStatus("已刷新数据源和空间表目录", "success");
     });
   }
@@ -194,8 +216,11 @@ export function useWebGisWorkspace() {
         "POST"
       );
       const nextAvailableLayers = await apiGet<LayerRegistration[]>("/api/layers");
-      availableLayers.value = nextAvailableLayers;
-      reconcileLoadedLayers(nextAvailableLayers);
+      postgisLayers.value = nextAvailableLayers.map((layer) => ({
+        ...layer,
+        sourceType: layer.sourceType ?? "postgis"
+      }));
+      reconcileLoadedLayers([...postgisLayers.value, ...webLayers.value]);
       setStatus(`扫描完成：${result.layers.length} 个空间表，可拖入地图添加图层`, "success");
     });
   }
@@ -304,7 +329,7 @@ export function useWebGisWorkspace() {
 
   async function readFeature(layerId: string, pk: string) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable) {
+    if (!layer?.queryable || layer.sourceType !== "postgis") {
       setStatus("当前图层不可查询", "warning");
       return undefined;
     }
@@ -327,6 +352,9 @@ export function useWebGisWorkspace() {
     if (query.sort) {
       params.set("sort", query.sort);
     }
+    if (query.ids?.length) {
+      params.set("ids", query.ids.join(","));
+    }
     return `/api/layers/${layerId}/features?${params.toString()}`;
   }
 
@@ -334,6 +362,7 @@ export function useWebGisWorkspace() {
     const page = await apiGet<FeaturePage>(buildFeaturePageUrl(layerId, query));
     attributeTableFeatures.value = page.items;
     attributeTableTotal.value = page.total;
+    attributeSqlResult.value = null;
     attributeTableQuery.value = {
       ...query,
       limit: page.limit,
@@ -344,7 +373,7 @@ export function useWebGisWorkspace() {
 
   async function openAttributeTable(layerId: string, queryPatch: Partial<AttributeTableQuery> = {}) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable) {
+    if (!layer?.queryable || layer.sourceType !== "postgis") {
       setStatus("当前图层不可打开属性表", "warning");
       return;
     }
@@ -364,6 +393,21 @@ export function useWebGisWorkspace() {
     });
   }
 
+  async function openAttributeTableForFeatureIds(layerId: string, featureIds: string[]) {
+    const ids = [...new Set(featureIds.map((id) => String(id).trim()).filter(Boolean))];
+    if (ids.length === 0) {
+      setStatus("选择范围内没有可查询要素", "warning");
+      return;
+    }
+    await openAttributeTable(layerId, {
+      ids,
+      limit: Math.min(500, Math.max(100, ids.length)),
+      offset: 0,
+      search: ""
+    });
+    setStatus(`范围选择完成：匹配 ${ids.length} 个要素，已在属性表中显示`, "success");
+  }
+
   async function updateAttributeTableQuery(queryPatch: Partial<AttributeTableQuery>) {
     const layer = attributeTableLayer.value;
     if (!layer) {
@@ -381,7 +425,7 @@ export function useWebGisWorkspace() {
 
   async function runLayerSqlQuery(layerId: string, sql: string, limit: number) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable) {
+    if (!layer?.queryable || layer.sourceType !== "postgis") {
       setStatus("当前图层不可执行 SQL 查询", "warning");
       return undefined;
     }
@@ -395,7 +439,7 @@ export function useWebGisWorkspace() {
 
   async function calculateLayerAttribute(layerId: string, payload: AttributeCalculationPayload) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.editable) {
+    if (!layer?.editable || layer.sourceType !== "postgis") {
       setStatus("当前图层不可执行属性计算", "warning");
       return undefined;
     }
@@ -416,7 +460,7 @@ export function useWebGisWorkspace() {
 
   async function saveFeature() {
     const layer = activeLayer.value;
-    if (!layer?.editable || !draftGeometry.value) {
+    if (!layer?.editable || layer.sourceType !== "postgis" || !draftGeometry.value) {
       setStatus("没有可保存的编辑内容", "warning");
       return undefined;
     }
@@ -436,7 +480,7 @@ export function useWebGisWorkspace() {
 
   async function deleteSelectedFeature() {
     const layer = activeLayer.value;
-    if (!layer?.editable || !selectedFeatureId.value) {
+    if (!layer?.editable || layer.sourceType !== "postgis" || !selectedFeatureId.value) {
       setStatus("没有可删除的已选要素", "warning");
       return false;
     }
@@ -452,14 +496,27 @@ export function useWebGisWorkspace() {
   async function updateLayerStyle(layerId: string, patch: LayerStylePatch) {
     await withBusy(async () => {
       const updated = await apiSend<LayerRegistration>(`/api/layers/${layerId}/style`, "PUT", patch);
-      availableLayers.value = availableLayers.value.map((layer) => layer.id === updated.id ? updated : layer);
+      postgisLayers.value = postgisLayers.value.map((layer) => layer.id === updated.id ? { ...updated, sourceType: "postgis" } : layer);
       setStatus(`已更新图层样式：${updated.schema}.${updated.table}`, "success");
     });
+  }
+
+  function saveWebServiceConnection(payload: WebServiceConnectionPayload) {
+    const id = `web-${payload.type}-${Date.now().toString(36)}`;
+    const connection: WebServiceConnection = {
+      id,
+      ...payload
+    };
+    webServiceConnections.value = [...webServiceConnections.value, connection];
+    webLayers.value = [...webLayers.value, createWebLayer(connection)];
+    setStatus(`已添加${payload.type.toUpperCase()}连接：${payload.name}`, "success");
+    return connection;
   }
 
   return {
     datasources,
     availableLayers,
+    webServiceConnections,
     loadedLayerIds,
     layers,
     activeLayerId,
@@ -502,6 +559,7 @@ export function useWebGisWorkspace() {
     restorePreviousVisibleLayers,
     readFeature,
     openAttributeTable,
+    openAttributeTableForFeatureIds,
     updateAttributeTableQuery,
     runLayerSqlQuery,
     calculateLayerAttribute,
@@ -509,7 +567,71 @@ export function useWebGisWorkspace() {
     saveFeature,
     deleteSelectedFeature,
     updateLayerStyle,
+    saveWebServiceConnection,
     clearDraftState,
     setStatus
+  };
+}
+
+function createWebLayer(connection: WebServiceConnection): LayerRegistration {
+  const sourceType = connection.type;
+  const name = connection.name.trim() || connection.url;
+  const id = connection.id.startsWith("web-") ? connection.id : `web-${connection.id}`;
+  const webSource = sourceType === "xyz"
+    ? {
+        type: "xyz" as const,
+        urlTemplate: connection.url,
+        attributions: connection.name
+      }
+    : sourceType === "wmts"
+      ? {
+          type: "wmts" as const,
+          url: connection.url,
+          layer: connection.layerName ?? name,
+          matrixSet: connection.matrixSet ?? "EPSG:3857",
+          style: connection.style,
+          format: connection.format ?? "image/png"
+        }
+      : {
+          type: "wms" as const,
+          url: connection.url,
+          layers: connection.layerName ?? name,
+          styles: connection.style ?? "",
+          format: connection.format ?? "image/png",
+          transparent: true,
+          version: "1.3.0"
+        };
+  return {
+    id,
+    datasourceId: "web-services",
+    sourceType,
+    displayName: name,
+    serviceConnectionId: connection.id,
+    webSource,
+    schema: sourceType === "xyz" ? "XYZ Tiles" : "WMS/WMTS",
+    table: name,
+    geometryColumn: "",
+    geometryType: "Raster",
+    srid: 3857,
+    primaryKey: null,
+    fields: [],
+    hasSpatialIndex: false,
+    canSelect: false,
+    canInsert: false,
+    canUpdate: false,
+    canDelete: false,
+    queryable: false,
+    editable: false,
+    editableReason: ["Web 栅格图层只读"],
+    tileUrl: "",
+    style: {
+      fill: "#00000000",
+      stroke: "#666666",
+      strokeWidth: 1,
+      pointRadius: 4,
+      opacity: 1
+    },
+    extent: null,
+    updatedAt: new Date().toISOString()
   };
 }

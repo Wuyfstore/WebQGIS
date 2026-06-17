@@ -67,6 +67,7 @@ const editor = useOpenLayersEditor({
   coordinatePrecision,
   coordinateAxisOrder,
   readFeature: workspace.readFeature,
+  openAttributeTableForFeatureIds: workspace.openAttributeTableForFeatureIds,
   clearSelection: workspace.clearDraftState,
   setStatus: workspace.setStatus
 });
@@ -74,6 +75,7 @@ const editor = useOpenLayersEditor({
 const {
   datasources,
   availableLayers,
+  webServiceConnections,
   loadedLayerIds,
   layers,
   activeLayerId,
@@ -366,6 +368,10 @@ const crsSourceLabels: Record<CrsDefinition["source"], string> = {
   fallback: "内置"
 };
 
+function layerLabel(layer: { schema: string; table: string; displayName?: string }) {
+  return layer.displayName ?? `${layer.schema}.${layer.table}`;
+}
+
 onMounted(async () => {
   window.addEventListener("pointerdown", closeMenuOnOutsidePointer);
   window.addEventListener("keydown", closeMenuOnEscape);
@@ -605,13 +611,17 @@ function startEditingLayer(layerId: string) {
     workspace.setStatus("请先选择一个图层", "warning");
     return;
   }
+  if ((layer.sourceType ?? "postgis") !== "postgis") {
+    workspace.setStatus("Web 栅格图层不支持编辑", "warning");
+    return;
+  }
   if (!layer.editable) {
     workspace.setStatus(`当前图层只读：${layer.editableReason.join("；") || "缺少可编辑条件"}`, "warning");
     return;
   }
   workspace.setActiveLayer(layer.id);
   editingLayerId.value = layer.id;
-  workspace.setStatus(`已开启图层编辑：${layer.schema}.${layer.table}`, "success");
+  workspace.setStatus(`已开启图层编辑：${layerLabel(layer)}`, "success");
 }
 
 function stopEditingLayer(layerId: string) {
@@ -621,7 +631,7 @@ function stopEditingLayer(layerId: string) {
   }
     editingLayerId.value = null;
     handleClearDraft();
-    workspace.setStatus(`已关闭图层编辑：${layer.schema}.${layer.table}`, "neutral");
+    workspace.setStatus(`已关闭图层编辑：${layerLabel(layer)}`, "neutral");
 }
 
 function toggleEditingLayer(layerId?: string) {
@@ -739,6 +749,11 @@ function handleMapStatusCopy(kind: "coordinate" | "scale" | "zoom", value: strin
 }
 
 function openAttributeTable(layerId: string) {
+  const layer = layers.value.find((item) => item.id === layerId);
+  if (layer && (layer.sourceType ?? "postgis") !== "postgis") {
+    workspace.setStatus("Web 栅格图层没有属性表", "warning");
+    return;
+  }
   void workspace.openAttributeTable(layerId);
 }
 
@@ -766,6 +781,11 @@ async function runAttributeCalculation(payload: { targetField: string; expressio
 }
 
 function openStyleEditor(layerId: string) {
+  const layer = layers.value.find((item) => item.id === layerId);
+  if (layer && (layer.sourceType ?? "postgis") !== "postgis") {
+    workspace.setStatus("Web 栅格图层暂不支持服务端样式编辑", "warning");
+    return;
+  }
   workspace.setActiveLayer(layerId);
   styleEditorLayerId.value = layerId;
 }
@@ -887,7 +907,7 @@ function validateActiveLayer() {
       >
         <option value="" disabled>未选择</option>
         <option v-for="layer in layers" :key="layer.id" :value="layer.id">
-          {{ layer.schema }}.{{ layer.table }}
+          {{ layerLabel(layer) }}
         </option>
       </select>
       <template v-if="isSnapEnabled">
@@ -901,11 +921,13 @@ function validateActiveLayer() {
         <DatasourcePanel
           :datasources="datasources"
           :available-layers="availableLayers"
+          :web-service-connections="webServiceConnections"
           :loaded-layer-ids="loadedLayerIds"
           v-model:form="datasourceForm"
           :busy="busy"
           :connection-dialog-request-key="datasourceDialogRequestKey"
           @save="workspace.saveDatasource"
+          @save-web-service-connection="workspace.saveWebServiceConnection"
           @scan="workspace.scanDatasource"
           @load-layer="loadLayerToMap"
           @layer-drag-start="rememberDraggedLayer"
@@ -1019,32 +1041,33 @@ function validateActiveLayer() {
             <header class="workbench__crs-header">
               <div>
                 <h2 id="crs-dialog-title" class="workbench__dialog-title">工程坐标参照系 (CRS)</h2>
-                <p class="workbench__crs-subtitle">参考 QGIS 工程属性，将项目 CRS 与坐标显示选项集中设置。</p>
+                <p class="workbench__crs-subtitle">参考 QGIS 工程属性，将项目 CRS、最近使用列表、坐标显示和地方坐标系集中设置。</p>
               </div>
               <button class="workbench__style-dialog-close focus-ring" type="button" aria-label="关闭 CRS 设置" @click="closeCrsDialog">
                 ×
               </button>
             </header>
 
-            <label class="workbench__crs-no-projection">
-              <input type="checkbox" disabled />
-              <span>无 CRS (或未知/非地球投影)</span>
-            </label>
-
-            <label class="workbench__crs-filter">
-              <span>过滤</span>
-              <input
-                class="workbench__crs-filter-input focus-ring"
-                type="search"
-                :value="crsSearchQuery"
-                aria-label="过滤 CRS"
-                placeholder="输入 EPSG、名称、SRID 或 Proj4 片段"
-                @input="handleCrsSearchInput"
-              />
-            </label>
+            <div class="workbench__crs-search-row">
+              <label class="workbench__crs-filter">
+                <span>过滤</span>
+                <input
+                  class="workbench__crs-filter-input focus-ring"
+                  type="search"
+                  :value="crsSearchQuery"
+                  aria-label="过滤 CRS"
+                  placeholder="输入 EPSG、名称、SRID 或 Proj4 片段"
+                  @input="handleCrsSearchInput"
+                />
+              </label>
+              <label class="workbench__crs-no-projection">
+                <input type="checkbox" disabled />
+                <span>无 CRS (或未知/非地球投影)</span>
+              </label>
+            </div>
 
             <div class="workbench__crs-grid">
-              <section class="workbench__crs-section" aria-label="最近使用的坐标参照系">
+              <section class="workbench__crs-section workbench__crs-section--recent" aria-label="最近使用的坐标参照系">
                 <h3 class="workbench__crs-section-title">最近使用的坐标参照系</h3>
                 <button
                   class="workbench__crs-row workbench__crs-row--active focus-ring"
@@ -1056,7 +1079,7 @@ function validateActiveLayer() {
                 </button>
               </section>
 
-              <section class="workbench__crs-section" aria-label="预定义坐标参照系">
+              <section class="workbench__crs-section workbench__crs-section--catalog" aria-label="预定义坐标参照系">
                 <div class="workbench__crs-section-heading">
                   <h3 class="workbench__crs-section-title">坐标参照系</h3>
                   <label class="workbench__crs-hide-deprecated">
@@ -1079,58 +1102,60 @@ function validateActiveLayer() {
                 <p v-if="!isCrsSearching && visibleCrsCatalog.length === 0" class="workbench__crs-empty">未找到匹配坐标系</p>
               </section>
 
-              <section class="workbench__crs-section workbench__crs-section--details" aria-label="坐标系详情">
-                <h3 class="workbench__crs-section-title">{{ selectedCrs.name }}</h3>
-                <dl class="workbench__crs-details">
-                  <div>
-                    <dt>授权 ID</dt>
-                    <dd>{{ selectedCrs.code }}</dd>
-                  </div>
-                  <div>
-                    <dt>SRID</dt>
-                    <dd>{{ selectedCrs.srid }}</dd>
-                  </div>
-                  <div>
-                    <dt>来源</dt>
-                    <dd>{{ crsSourceLabels[selectedCrs.source] }}</dd>
-                  </div>
-                  <div>
-                    <dt>用途</dt>
-                    <dd>{{ selectedCrs.scope || "-" }}</dd>
-                  </div>
-                  <div>
-                    <dt>范围</dt>
-                    <dd>{{ selectedCrs.area || "-" }}</dd>
-                  </div>
-                  <div>
-                    <dt>Proj4</dt>
-                    <dd>{{ selectedCrs.proj4text || "-" }}</dd>
-                  </div>
-                </dl>
-              </section>
+              <aside class="workbench__crs-side">
+                <section class="workbench__crs-section workbench__crs-section--details" aria-label="坐标系详情">
+                  <h3 class="workbench__crs-section-title">{{ selectedCrs.name }}</h3>
+                  <dl class="workbench__crs-details">
+                    <div>
+                      <dt>授权 ID</dt>
+                      <dd>{{ selectedCrs.code }}</dd>
+                    </div>
+                    <div>
+                      <dt>SRID</dt>
+                      <dd>{{ selectedCrs.srid }}</dd>
+                    </div>
+                    <div>
+                      <dt>来源</dt>
+                      <dd>{{ crsSourceLabels[selectedCrs.source] }}</dd>
+                    </div>
+                    <div>
+                      <dt>用途</dt>
+                      <dd>{{ selectedCrs.scope || "-" }}</dd>
+                    </div>
+                    <div>
+                      <dt>范围</dt>
+                      <dd>{{ selectedCrs.area || "-" }}</dd>
+                    </div>
+                    <div>
+                      <dt>Proj4</dt>
+                      <dd>{{ selectedCrs.proj4text || "-" }}</dd>
+                    </div>
+                  </dl>
+                </section>
 
-              <section class="workbench__crs-section workbench__crs-section--settings" aria-label="坐标显示设置">
-                <h3 class="workbench__crs-section-title">坐标显示</h3>
-                <div class="workbench__crs-setting">
-                  <span>显示 CRS</span>
-                  <strong>{{ displayProjection }}</strong>
-                </div>
-                <label class="workbench__crs-setting">
-                  <span>坐标顺序</span>
-                  <select class="workbench__crs-select focus-ring" :value="coordinateAxisOrder" @change="setCoordinateAxisOrder">
-                    <option value="xy">X, Y</option>
-                    <option value="yx">Y, X</option>
-                  </select>
-                </label>
-                <label class="workbench__crs-setting">
-                  <span>小数位数</span>
-                  <select class="workbench__crs-select focus-ring" :value="coordinatePrecision" @change="setCoordinatePrecision">
-                    <option v-for="precision in coordinatePrecisionOptions" :key="precision" :value="precision">
-                      {{ precision }}
-                    </option>
-                  </select>
-                </label>
-              </section>
+                <section class="workbench__crs-section workbench__crs-section--settings" aria-label="坐标显示设置">
+                  <h3 class="workbench__crs-section-title">坐标显示</h3>
+                  <div class="workbench__crs-setting">
+                    <span>显示 CRS</span>
+                    <strong>{{ displayProjection }}</strong>
+                  </div>
+                  <label class="workbench__crs-setting">
+                    <span>坐标顺序</span>
+                    <select class="workbench__crs-select focus-ring" :value="coordinateAxisOrder" @change="setCoordinateAxisOrder">
+                      <option value="xy">X, Y</option>
+                      <option value="yx">Y, X</option>
+                    </select>
+                  </label>
+                  <label class="workbench__crs-setting">
+                    <span>小数位数</span>
+                    <select class="workbench__crs-select focus-ring" :value="coordinatePrecision" @change="setCoordinatePrecision">
+                      <option v-for="precision in coordinatePrecisionOptions" :key="precision" :value="precision">
+                        {{ precision }}
+                      </option>
+                    </select>
+                  </label>
+                </section>
+              </aside>
 
               <section class="workbench__crs-section workbench__crs-section--custom" aria-label="地方坐标系">
                 <div class="workbench__crs-section-heading">
@@ -1628,7 +1653,7 @@ function validateActiveLayer() {
 
 .workbench__crs-dialog {
   display: grid;
-  width: min(860px, calc(100vw - 48px));
+  width: min(980px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
   grid-template-columns: 150px minmax(0, 1fr);
   border: 1px solid #777777;
@@ -1662,9 +1687,10 @@ function validateActiveLayer() {
 .workbench__crs-content {
   display: grid;
   min-width: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 10px;
   padding: 12px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .workbench__crs-header {
@@ -1680,6 +1706,13 @@ function validateActiveLayer() {
   margin: 0;
   color: var(--qgis-muted);
   font-size: 12px;
+}
+
+.workbench__crs-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
 }
 
 .workbench__crs-no-projection,
@@ -1715,7 +1748,9 @@ function validateActiveLayer() {
 
 .workbench__crs-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: 0;
+  grid-template-columns: minmax(360px, 1fr) 300px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
 }
 
@@ -1724,13 +1759,29 @@ function validateActiveLayer() {
   background: #f7f7f7;
 }
 
-.workbench__crs-section--details,
-.workbench__crs-section--settings {
+.workbench__crs-section--recent,
+.workbench__crs-section--catalog {
+  grid-column: 1;
+}
+
+.workbench__crs-section--catalog {
+  min-height: 0;
+  overflow: auto;
+}
+
+.workbench__crs-side {
+  display: grid;
+  min-height: 0;
   grid-column: 2;
+  grid-row: 1 / span 2;
+  align-content: start;
+  gap: 10px;
 }
 
 .workbench__crs-section--custom {
   grid-column: 1 / -1;
+  max-height: 210px;
+  overflow: auto;
 }
 
 .workbench__crs-section-title {
@@ -1771,6 +1822,13 @@ function validateActiveLayer() {
   text-align: left;
 }
 
+.workbench__crs-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workbench__crs-row:hover,
 .workbench__crs-row--active {
   background: var(--qgis-row-active);
@@ -1801,6 +1859,9 @@ function validateActiveLayer() {
 
 .workbench__crs-details dd {
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workbench__crs-section--settings {

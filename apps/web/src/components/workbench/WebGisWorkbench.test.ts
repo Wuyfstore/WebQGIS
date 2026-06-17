@@ -305,7 +305,7 @@ vi.mock("../../api", () => ({
 }));
 
 async function expandDatasource(wrapper: ReturnType<typeof mount<typeof WebGisWorkbench>>) {
-  if (wrapper.findAll(".datasource-panel__tree-node--layer").length > 0) {
+  if (wrapper.findAll(".datasource-panel__tree-node--layer").some((button) => button.text().includes("public.china_2025_city"))) {
     return;
   }
   const sourceButton = wrapper.findAll(".datasource-panel__tree-node--source")
@@ -579,6 +579,7 @@ describe("WebGisWorkbench", () => {
       props: {
         datasources: sampleDatasources,
         availableLayers: [],
+        webServiceConnections: [],
         loadedLayerIds: new Set<string>(),
         busy: false,
         connectionDialogRequestKey: 0,
@@ -1042,8 +1043,9 @@ describe("WebGisWorkbench", () => {
     expect(tabs[0].classList.contains("attribute-table__tab--active")).toBe(true);
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
     expect(tabs[1].classList.contains("attribute-table__tab--active")).toBe(false);
-    expect(tabs[2].textContent).toContain("属性计算器");
-    expect(tabs[3].textContent).toContain("SQL 查询");
+    expect(tabs).toHaveLength(2);
+    expect(document.body.textContent).toContain("字段计算器");
+    expect(document.body.textContent).toContain("SQL 查询");
 
     Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
       .find((button) => button.textContent?.trim() === "下一页")
@@ -1114,8 +1116,11 @@ describe("WebGisWorkbench", () => {
       .map((cell) => cell.textContent?.trim());
     expect(visibleFieldNames).toEqual(["id", "adcode", "name"]);
 
-    await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[2].click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__tool-launch"))
+      .find((button) => button.textContent?.trim() === "字段计算器")
+      ?.click();
     await flushPromises();
+    expect(document.querySelector(".attribute-table__floating-tool--calculator")).not.toBeNull();
     expect(document.body.textContent).toContain("字段和值");
     expect(document.body.textContent).toContain("输出字段");
     expect(document.body.textContent).toContain("预览 SQL");
@@ -1143,9 +1148,13 @@ describe("WebGisWorkbench", () => {
       where: undefined
     });
     expect(wrapper.text()).toContain("属性计算完成：name 更新 2 行");
+    expect(document.querySelector(".attribute-table__floating-tool--calculator")).toBeNull();
 
-    await document.querySelectorAll<HTMLButtonElement>(".attribute-table__tab")[3].click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__tool-launch"))
+      .find((button) => button.textContent?.trim() === "SQL 查询")
+      ?.click();
     await flushPromises();
+    expect(document.querySelector(".attribute-table__floating-tool--sql")).not.toBeNull();
     expect(document.body.textContent).toContain("仅允许当前图层的单条 SELECT");
     Array.from(document.querySelectorAll<HTMLButtonElement>(".attribute-table__pager-button"))
       .find((button) => button.textContent?.trim() === "执行 SQL")
@@ -1158,6 +1167,8 @@ describe("WebGisWorkbench", () => {
     });
     expect(document.body.textContent).toContain("SQL 查询完成：返回 1 条记录");
     expect(document.body.textContent).toContain("成都市");
+    expect(document.querySelector(".attribute-table__floating-tool--sql")).toBeNull();
+    expect(document.body.textContent).toContain("SQL 查询结果 · 1 条 SQL 记录");
 
     await document.querySelector<HTMLButtonElement>(".attribute-table__close")?.click();
     await flushPromises();

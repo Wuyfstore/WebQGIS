@@ -83,6 +83,7 @@ export type FeaturePageQuery = {
   limit: number;
   offset: number;
   search: string;
+  ids?: string[];
   sort?: string;
   order: "asc" | "desc";
 };

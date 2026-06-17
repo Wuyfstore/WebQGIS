@@ -264,14 +264,23 @@ export class PostgisRepository implements OnApplicationShutdown {
     const limit = Number(query.limit);
     const offset = Number(query.offset);
     const search = (query.search ?? "").trim();
+    const ids = [...new Set((query.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
     const values: unknown[] = [layer.geometryColumn];
     if (search) {
       values.push(`%${search}%`);
     }
+    const idValuesIndex = ids.length > 0 ? values.length + 1 : null;
+    if (ids.length > 0) {
+      values.push(ids);
+    }
     const limitIndex = values.length + 1;
     const offsetIndex = values.length + 2;
     values.push(limit, offset);
-    const whereClause = search ? "where to_jsonb(t)::text ilike $2" : "";
+    const filters = [
+      search ? "to_jsonb(t)::text ilike $2" : "",
+      idValuesIndex ? `${quoteIdent(layer.primaryKey!)}::text = any($${idValuesIndex}::text[])` : ""
+    ].filter(Boolean);
+    const whereClause = filters.length > 0 ? `where ${filters.join(" and ")}` : "";
     const result = await pool.query<{ feature: FeatureSummary }>(
       `
       select jsonb_build_object(
@@ -288,12 +297,22 @@ export class PostgisRepository implements OnApplicationShutdown {
       `,
       values
     );
-    const countValues = search ? [`%${search}%`] : [];
+    const countValues: unknown[] = [];
+    const countFilters: string[] = [];
+    if (search) {
+      countValues.push(`%${search}%`);
+      countFilters.push(`to_jsonb(t)::text ilike $${countValues.length}`);
+    }
+    if (ids.length > 0) {
+      countValues.push(ids);
+      countFilters.push(`${quoteIdent(layer.primaryKey!)}::text = any($${countValues.length}::text[])`);
+    }
+    const countWhereClause = countFilters.length > 0 ? `where ${countFilters.join(" and ")}` : "";
     const countResult = await pool.query<{ total: string }>(
       `
       select count(*)::text as total
       from ${qualifiedTable(layer)} t
-      ${search ? "where to_jsonb(t)::text ilike $1" : ""}
+      ${countWhereClause}
       `,
       countValues
     );

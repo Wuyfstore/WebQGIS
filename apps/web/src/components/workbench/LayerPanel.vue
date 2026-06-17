@@ -40,7 +40,13 @@ const contextMenuStyle = computed(() => ({
 }));
 const contextLayer = computed(() => props.layers.find((layer) => layer.id === contextMenu.value.layerId));
 const isContextLayerEditing = computed(() => Boolean(contextLayer.value && props.editingLayerId === contextLayer.value.id));
+const canOpenContextAttributes = computed(() => Boolean(contextLayer.value?.queryable && (contextLayer.value.sourceType ?? "postgis") === "postgis"));
+const canEditContextLayer = computed(() => Boolean(contextLayer.value?.editable && (contextLayer.value.sourceType ?? "postgis") === "postgis"));
 const isLayerDragOver = shallowRef(false);
+
+function layerLabel(layer: LayerRegistration) {
+  return layer.displayName ?? `${layer.schema}.${layer.table}`;
+}
 
 function handleLayerDragOver(event: DragEvent) {
   if (!hasLayerDragPayload(event, props.dragLayerFallbackId)) {
@@ -134,7 +140,7 @@ onBeforeUnmount(() => {
               class="focus-ring"
               type="checkbox"
               :checked="visibleLayerIds.has(layer.id)"
-              :aria-label="`显示 ${layer.schema}.${layer.table}`"
+              :aria-label="`显示 ${layerLabel(layer)}`"
               @change="emit('toggle', layer.id)"
             />
           </label>
@@ -142,7 +148,7 @@ onBeforeUnmount(() => {
           <span class="layer-panel__symbol" :style="{ backgroundColor: layer.style.fill.slice(0, 7), borderColor: layer.style.stroke }"></span>
 
           <button class="layer-panel__select focus-ring" type="button" @click="emit('select', layer.id)">
-            <span class="layer-panel__name">{{ layer.schema }}.{{ layer.table }}</span>
+            <span class="layer-panel__name">{{ layerLabel(layer) }}</span>
           </button>
 
           <span class="layer-panel__tag" :class="{ 'layer-panel__tag--readonly': !layer.editable }">
@@ -172,7 +178,7 @@ onBeforeUnmount(() => {
         <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('refreshLayer', layerId))">
           刷新图层
         </button>
-        <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('openAttributeTable', layerId))">
+        <button class="layer-panel__context-item" :disabled="!canOpenContextAttributes" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('openAttributeTable', layerId))">
           打开属性表
         </button>
         <button class="layer-panel__context-item" type="button" role="menuitem" @click="runContextLayerCommand((layerId) => emit('openStyleEditor', layerId))">
@@ -190,7 +196,7 @@ onBeforeUnmount(() => {
         <button
           v-else
           class="layer-panel__context-item"
-          :disabled="!contextLayer.editable"
+          :disabled="!canEditContextLayer"
           type="button"
           role="menuitem"
           @click="runContextLayerCommand((layerId) => emit('startEditing', layerId))"
