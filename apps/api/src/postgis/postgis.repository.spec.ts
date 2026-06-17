@@ -46,6 +46,7 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
     editable: true,
     editableReason: [],
     tileUrl: "/api/layers/layer-1/tile/{z}/{x}/{y}.mvt",
+    tileVersion: 1,
     style: {
       fill: "#ffffff",
       stroke: "#2563eb",

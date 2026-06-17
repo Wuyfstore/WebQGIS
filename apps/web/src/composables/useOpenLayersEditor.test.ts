@@ -17,6 +17,7 @@ import {
   readVectorTileFeaturePk,
   selectionModeStatus,
   uniqueFeatureIds,
+  versionedTileUrl,
   writeSelectionGeometryObject,
   buildSelectionSamplePixels
 } from "./useOpenLayersEditor";
@@ -59,6 +60,17 @@ describe("readVectorTileFeaturePk", () => {
 
   it("returns null for an empty layer extent", () => {
     expect(projectLayerExtent(null)).toBeNull();
+  });
+
+  it("appends tileVersion to vector tile urls", () => {
+    expect(versionedTileUrl({
+      tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt",
+      tileVersion: 3
+    })).toBe("/api/layers/city/tile/{z}/{x}/{y}.mvt?v=3");
+    expect(versionedTileUrl({
+      tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt?debug=1",
+      tileVersion: 4
+    })).toBe("/api/layers/city/tile/{z}/{x}/{y}.mvt?debug=1&v=4");
   });
 
   it("formats live map status labels", () => {

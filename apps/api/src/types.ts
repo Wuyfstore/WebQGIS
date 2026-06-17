@@ -62,6 +62,7 @@ export type LayerRegistration = {
   editable: boolean;
   editableReason: string[];
   tileUrl: string;
+  tileVersion: number;
   style: LayerStyle;
   extent: [number, number, number, number] | null;
   updatedAt: string;
@@ -77,6 +78,11 @@ export type GeoJsonFeature = {
 export type FeaturePayload = {
   geometry?: unknown;
   properties?: Record<string, unknown>;
+};
+
+export type FeatureWriteResult = {
+  feature: GeoJsonFeature;
+  tileVersion: number;
 };
 
 export type FeatureSelectionPayload = {

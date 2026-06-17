@@ -86,6 +86,11 @@ export function projectLayerExtent(extent: LayerRegistration["extent"]) {
   return transformExtent(extent, "EPSG:4326", "EPSG:3857");
 }
 
+export function versionedTileUrl(layer: Pick<LayerRegistration, "tileUrl" | "tileVersion">) {
+  const separator = layer.tileUrl.includes("?") ? "&" : "?";
+  return `${layer.tileUrl}${separator}v=${encodeURIComponent(String(layer.tileVersion ?? 1))}`;
+}
+
 export function estimateScaleDenominator(resolution?: number | null, center: [number, number] = [0, 0]) {
   if (!resolution || !Number.isFinite(resolution) || resolution <= 0) {
     return null;
@@ -361,6 +366,12 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       mountedLayer?.setOpacity(layer.style.opacity);
       if (isVectorTileLayer(mountedLayer)) {
         mountedLayer.setStyle((feature) => layerStyle(layer, feature));
+        const source = mountedLayer.getSource();
+        const nextUrl = versionedTileUrl(layer);
+        if (source && source.getUrls()?.[0] !== nextUrl) {
+          source.setUrl(nextUrl);
+          source.refresh();
+        }
       }
     }
     for (const [id, tileLayer] of layerMap) {
@@ -431,7 +442,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     return new VectorTileLayer({
       source: new VectorTileSource({
         format: new MVT({ idProperty: layer.primaryKey ?? undefined }),
-        url: layer.tileUrl
+        url: versionedTileUrl(layer)
       }),
       opacity: layer.style.opacity,
       style: (feature) => layerStyle(layer, feature)

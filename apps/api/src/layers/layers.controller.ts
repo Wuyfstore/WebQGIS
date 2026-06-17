@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, Inject, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { FeatureParamDto } from "./dto/feature-param.dto.js";
 import { FeatureListQueryDto } from "./dto/feature-list-query.dto.js";
 import { FeaturePayloadDto } from "./dto/feature-payload.dto.js";
@@ -58,9 +58,8 @@ export class LayersController {
   }
 
   @Delete(":id/features/:pk")
-  @HttpCode(204)
-  async deleteFeature(@Param() params: FeatureParamDto) {
-    await this.layersService.deleteFeature(params.id, params.pk);
+  deleteFeature(@Param() params: FeatureParamDto) {
+    return this.layersService.deleteFeature(params.id, params.pk);
   }
 
   @Put(":id/style")
@@ -69,8 +68,14 @@ export class LayersController {
   }
 
   @Get(":id/tile/:z/:x/:y.mvt")
-  @Header("content-type", "application/x-protobuf")
-  getVectorTile(@Param() params: TileParamDto) {
+  @Header("content-type", "application/vnd.mapbox-vector-tile")
+  @Header("cache-control", "public, max-age=31536000, immutable")
+  async getVectorTile(
+    @Param() params: TileParamDto,
+    @Query("v") version: string | undefined,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): void }
+  ) {
+    response.setHeader("etag", `"${params.id}-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
     return this.layersService.getVectorTile(params.id, params.z, params.x, params.y);
   }
 }

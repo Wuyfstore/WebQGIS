@@ -145,6 +145,7 @@ export type LayerRegistration = {
   editable: boolean;
   editableReason: string[];
   tileUrl: string;
+  tileVersion: number;
   style: {
     fill: string;
     stroke: string;
@@ -159,6 +160,11 @@ export type LayerRegistration = {
 export type LayerStyle = LayerRegistration["style"];
 
 export type LayerStylePatch = Partial<LayerStyle>;
+
+export type FeatureWriteResult = {
+  feature: GeoJsonFeature;
+  tileVersion: number;
+};
 
 export type CrsDefinition = {
   id: string;

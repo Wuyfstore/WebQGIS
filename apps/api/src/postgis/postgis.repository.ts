@@ -189,6 +189,7 @@ export class PostgisRepository implements OnApplicationShutdown {
         editable: editableReason.length === 0,
         editableReason,
         tileUrl: `/api/layers/${id}/tile/{z}/{x}/{y}.mvt`,
+        tileVersion: 1,
         style: this.defaultStyle(index),
         extent,
         updatedAt: new Date().toISOString()

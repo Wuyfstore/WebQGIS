@@ -57,6 +57,7 @@ const sampleLayers: LayerRegistration[] = [
     editable: true,
     editableReason: [],
     tileUrl: "/api/layers/province/tile/{z}/{x}/{y}.mvt",
+    tileVersion: 1,
     style: {
       fill: "#5ca8ff66",
       stroke: "#2563eb",
@@ -111,6 +112,7 @@ const sampleLayers: LayerRegistration[] = [
     editable: true,
     editableReason: [],
     tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt",
+    tileVersion: 1,
     style: {
       fill: "#94d82d66",
       stroke: "#2f9e44",
@@ -212,6 +214,7 @@ const editorMock = {
 };
 
 let editorOptions: {
+  layers: { value: LayerRegistration[] };
   selectedFeatureId: { value: string | null };
   draftGeometry: { value: unknown };
   markDraftDirty?: () => void;
@@ -288,13 +291,28 @@ vi.mock("../../api", () => ({
     }
     if (path === "/api/layers/city/features/2048" && method === "PUT") {
       return {
-        type: "Feature" as const,
-        id: 2048,
-        geometry: { type: "Point", coordinates: [105, 31] },
-        properties: {
+        feature: {
+          type: "Feature" as const,
           id: 2048,
-          name: "服务端确认名称",
-          adcode: 510104
+          geometry: { type: "Point", coordinates: [105, 31] },
+          properties: {
+            id: 2048,
+            name: "服务端确认名称",
+            adcode: 510104
+          }
+        },
+        tileVersion: 2
+      };
+    }
+    if (path === "/api/layers/city/features/2049" && method === "PUT") {
+      return {
+        type: "Feature" as const,
+        id: 2049,
+        geometry: { type: "Point", coordinates: [106, 32] },
+        properties: {
+          id: 2049,
+          name: "旧格式服务端返回",
+          adcode: 510105
         }
       };
     }
@@ -925,6 +943,7 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.loadEditableFeature).toHaveBeenCalledWith(savedFeature);
     expect(editorMock.markFeatureCovered).toHaveBeenCalledWith("city", 2048);
     expect(editorMock.refreshLayer).toHaveBeenCalledWith("city");
+    expect(editorOptions!.layers.value.find((layer) => layer.id === "city")?.tileVersion).toBe(2);
     expect(editorOptions!.draftGeometry.value).toEqual({ type: "Point", coordinates: [105, 31] });
     expect(wrapper.find<HTMLInputElement>(".edit-inspector__input").element.value).toBe("服务端确认名称");
   });
@@ -955,6 +974,39 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.loadEditableFeature).not.toHaveBeenCalled();
     expect(editorMock.markFeatureCovered).not.toHaveBeenCalled();
     expect(editorMock.refreshLayer).not.toHaveBeenCalledWith("city");
+  });
+
+  it("keeps compatibility with legacy feature-only save responses", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.selectedFeatureId.value = "2049";
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    editorOptions!.markDraftDirty?.();
+    await flushPromises();
+    editorMock.loadEditableFeature.mockClear();
+
+    const saveTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "保存当前编辑");
+    await saveTool?.trigger("click");
+    await flushPromises();
+
+    expect(editorMock.loadEditableFeature).toHaveBeenCalledWith({
+      type: "Feature",
+      id: 2049,
+      geometry: { type: "Point", coordinates: [106, 32] },
+      properties: {
+        id: 2049,
+        name: "旧格式服务端返回",
+        adcode: 510105
+      }
+    });
+    expect(editorOptions!.layers.value.find((layer) => layer.id === "city")?.tileVersion).toBe(1);
   });
 
   it("switches active layers from the context bar and hides snap details when snapping is off", async () => {

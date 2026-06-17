@@ -12,7 +12,8 @@ export class LayersRepository {
   ) {}
 
   async findAll(): Promise<LayerRegistration[]> {
-    return this.store.read<LayerRegistration[]>(this.fileName, []);
+    const layers = await this.store.read<LayerRegistration[]>(this.fileName, []);
+    return layers.map((layer) => this.withDefaults(layer));
   }
 
   async findById(id: string): Promise<LayerRegistration | undefined> {
@@ -31,7 +32,8 @@ export class LayersRepository {
       return previous
         ? {
             ...layer,
-            style: previous.style
+            style: previous.style,
+            tileVersion: previous.tileVersion ?? 1
           }
         : layer;
     });
@@ -62,5 +64,33 @@ export class LayersRepository {
     }
     await this.store.write(this.fileName, next);
     return updatedLayer;
+  }
+
+  async bumpTileVersion(id: string): Promise<LayerRegistration | undefined> {
+    const layers = await this.findAll();
+    let updatedLayer: LayerRegistration | undefined;
+    const next = layers.map((layer) => {
+      if (layer.id !== id) {
+        return layer;
+      }
+      updatedLayer = {
+        ...layer,
+        tileVersion: (layer.tileVersion ?? 1) + 1,
+        updatedAt: new Date().toISOString()
+      };
+      return updatedLayer;
+    });
+    if (!updatedLayer) {
+      return undefined;
+    }
+    await this.store.write(this.fileName, next);
+    return updatedLayer;
+  }
+
+  private withDefaults(layer: LayerRegistration): LayerRegistration {
+    return {
+      ...layer,
+      tileVersion: layer.tileVersion ?? 1
+    };
   }
 }

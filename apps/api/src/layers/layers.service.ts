@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatasourcesRepository } from "../datasources/datasources.repository.js";
 import { PostgisRepository } from "../postgis/postgis.repository.js";
-import type { FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, LayerRegistration, LayerStyle } from "../types.js";
+import type { FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, FeatureWriteResult, LayerRegistration, LayerStyle } from "../types.js";
 import { AttributeCalculationDto } from "./dto/attribute-calculation.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
 import { SqlQueryDto } from "./dto/sql-query.dto.js";
@@ -9,6 +9,8 @@ import { LayersRepository } from "./layers.repository.js";
 
 @Injectable()
 export class LayersService {
+  private readonly tileCache = new Map<string, Buffer>();
+
   constructor(
     @Inject(LayersRepository)
     private readonly layersRepository: LayersRepository,
@@ -56,22 +58,28 @@ export class LayersService {
     return this.postgisRepository.selectFeatures(datasource, layer, payload);
   }
 
-  async createFeature(layerId: string, payload: FeaturePayload) {
+  async createFeature(layerId: string, payload: FeaturePayload): Promise<FeatureWriteResult> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
-    return this.postgisRepository.createFeature(datasource, layer, payload);
+    const feature = await this.postgisRepository.createFeature(datasource, layer, payload);
+    const tileVersion = await this.bumpLayerTileVersion(layerId);
+    return { feature, tileVersion };
   }
 
-  async updateFeature(layerId: string, pk: string, payload: FeaturePayload) {
+  async updateFeature(layerId: string, pk: string, payload: FeaturePayload): Promise<FeatureWriteResult> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
-    return this.postgisRepository.updateFeature(datasource, layer, pk, payload);
+    const feature = await this.postgisRepository.updateFeature(datasource, layer, pk, payload);
+    const tileVersion = await this.bumpLayerTileVersion(layerId);
+    return { feature, tileVersion };
   }
 
-  async deleteFeature(layerId: string, pk: string): Promise<void> {
+  async deleteFeature(layerId: string, pk: string): Promise<{ tileVersion: number }> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
     await this.postgisRepository.deleteFeature(datasource, layer, pk);
+    const tileVersion = await this.bumpLayerTileVersion(layerId);
+    return { tileVersion };
   }
 
   async updateStyle(layerId: string, dto: LayerStyleDto): Promise<LayerRegistration> {
@@ -90,7 +98,15 @@ export class LayersService {
   async getVectorTile(layerId: string, z: number, x: number, y: number): Promise<Buffer> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
-    return this.postgisRepository.getVectorTile(datasource, layer, z, x, y);
+    const tileVersion = layer.tileVersion ?? 1;
+    const cacheKey = this.tileCacheKey(layerId, z, x, y, tileVersion);
+    const cached = this.tileCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const tile = await this.postgisRepository.getVectorTile(datasource, layer, z, x, y);
+    this.tileCache.set(cacheKey, tile);
+    return tile;
   }
 
   async getRequiredLayer(id: string): Promise<LayerRegistration> {
@@ -107,5 +123,27 @@ export class LayersService {
       throw new NotFoundException("Datasource not found");
     }
     return datasource;
+  }
+
+  private async bumpLayerTileVersion(layerId: string): Promise<number> {
+    const updated = await this.layersRepository.bumpTileVersion(layerId);
+    if (!updated) {
+      throw new NotFoundException("Layer not found");
+    }
+    this.clearTileCacheForLayer(layerId);
+    return updated.tileVersion;
+  }
+
+  private clearTileCacheForLayer(layerId: string) {
+    const prefix = `${layerId}:`;
+    for (const key of this.tileCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.tileCache.delete(key);
+      }
+    }
+  }
+
+  private tileCacheKey(layerId: string, z: number, x: number, y: number, tileVersion: number) {
+    return `${layerId}:${z}:${x}:${y}:${tileVersion}`;
   }
 }

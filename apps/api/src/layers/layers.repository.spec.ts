@@ -35,6 +35,7 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
     editable: true,
     editableReason: [],
     tileUrl: "/api/layers/layer-1/tile/{z}/{x}/{y}.mvt",
+    tileVersion: 1,
     style: {
       fill: "#6EA8FE55",
       stroke: "#1D4ED8",
@@ -83,7 +84,16 @@ describe("LayersRepository", () => {
     ]);
 
     expect(next.find((layer) => layer.id === "layer-1")?.style).toEqual(customStyle);
+    expect(next.find((layer) => layer.id === "layer-1")?.tileVersion).toBe(1);
     expect(next.find((layer) => layer.id === "other-layer")).toBeDefined();
+  });
+
+  it("preserves tileVersion when replacing scanned layers for a datasource", async () => {
+    await store.write("layers.json", [createLayer({ tileVersion: 9 })]);
+
+    const next = await repository.replaceForDatasource("source-1", [createLayer({ tileVersion: 1 })]);
+
+    expect(next.find((layer) => layer.id === "layer-1")?.tileVersion).toBe(9);
   });
 
   it("updates layer style and timestamp", async () => {
@@ -105,5 +115,23 @@ describe("LayersRepository", () => {
       opacity: 0.65
     });
     expect(updated?.updatedAt).not.toBe("2026-06-12T00:00:00.000Z");
+  });
+
+  it("bumps layer tileVersion and timestamp", async () => {
+    await store.write("layers.json", [createLayer({ tileVersion: 3 })]);
+
+    const updated = await repository.bumpTileVersion("layer-1");
+
+    expect(updated?.tileVersion).toBe(4);
+    expect(updated?.updatedAt).not.toBe("2026-06-12T00:00:00.000Z");
+    expect((await repository.findById("layer-1"))?.tileVersion).toBe(4);
+  });
+
+  it("defaults missing tileVersion to one for existing registries", async () => {
+    const legacyLayer: Omit<LayerRegistration, "tileVersion"> & { tileVersion?: number } = createLayer();
+    delete legacyLayer.tileVersion;
+    await store.write("layers.json", [legacyLayer]);
+
+    expect((await repository.findById("layer-1"))?.tileVersion).toBe(1);
   });
 });

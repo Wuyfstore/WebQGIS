@@ -50,6 +50,7 @@ const layer: LayerRegistration = {
   editable: true,
   editableReason: [],
   tileUrl: "/api/layers/layer-1/tile/{z}/{x}/{y}.mvt",
+  tileVersion: 1,
   style: {
     fill: "#ffffff",
     stroke: "#111827",

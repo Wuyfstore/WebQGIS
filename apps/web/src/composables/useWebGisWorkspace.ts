@@ -13,6 +13,7 @@ import type {
   FeaturePage,
   FeatureSelectionResult,
   FeatureSummary,
+  FeatureWriteResult,
   GeoJsonFeature,
   LayerRegistration,
   LayerStylePatch,
@@ -145,6 +146,18 @@ export function useWebGisWorkspace() {
 
   function markDraftClean() {
     isDraftDirty.value = false;
+  }
+
+  function applyLayerTileVersion(layerId: string, tileVersion: number) {
+    postgisLayers.value = postgisLayers.value.map((layer) => (
+      layer.id === layerId
+        ? {
+            ...layer,
+            tileVersion,
+            sourceType: layer.sourceType ?? "postgis"
+          }
+        : layer
+    ));
   }
 
   function setDisplayProjection(nextProjection: string) {
@@ -509,9 +522,13 @@ export function useWebGisWorkspace() {
         geometry: draftGeometry.value,
         properties: selectedProperties.value
       };
-      const saved = selectedFeatureId.value
-        ? await apiSend<GeoJsonFeature>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "PUT", payload)
-        : await apiSend<GeoJsonFeature>(`/api/layers/${layer.id}/features`, "POST", payload);
+      const result = selectedFeatureId.value
+        ? await apiSend<GeoJsonFeature | FeatureWriteResult>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "PUT", payload)
+        : await apiSend<GeoJsonFeature | FeatureWriteResult>(`/api/layers/${layer.id}/features`, "POST", payload);
+      const saved = normalizeFeatureWriteResult(result);
+      if ("tileVersion" in result) {
+        applyLayerTileVersion(layer.id, result.tileVersion);
+      }
       setSelectedFeature(saved);
       draftGeometry.value = saved.geometry;
       markDraftClean();
@@ -527,7 +544,10 @@ export function useWebGisWorkspace() {
       return false;
     }
     const deleted = await withBusy(async () => {
-      await apiSend<void>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "DELETE");
+      const result = await apiSend<void | { tileVersion: number }>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "DELETE");
+      if (result && typeof result === "object" && "tileVersion" in result) {
+        applyLayerTileVersion(layer.id, result.tileVersion);
+      }
       clearDraftState();
       setStatus("删除成功", "success");
       return true;
@@ -617,8 +637,13 @@ export function useWebGisWorkspace() {
     clearDraftState,
     markDraftDirty,
     markDraftClean,
+    applyLayerTileVersion,
     setStatus
   };
+}
+
+function normalizeFeatureWriteResult(result: GeoJsonFeature | FeatureWriteResult): GeoJsonFeature {
+  return "feature" in result ? result.feature : result;
 }
 
 function createWebLayer(connection: WebServiceConnection): LayerRegistration {
@@ -672,6 +697,7 @@ function createWebLayer(connection: WebServiceConnection): LayerRegistration {
     editable: false,
     editableReason: ["Web 栅格图层只读"],
     tileUrl: "",
+    tileVersion: 1,
     style: {
       fill: "#00000000",
       stroke: "#666666",
