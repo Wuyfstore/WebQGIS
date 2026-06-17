@@ -7,6 +7,7 @@ import {
   featureIntersectsSelectionGeometry,
   formatCoordinateLabel,
   formatScaleLabel,
+  overlayLayerZIndexes,
   projectLayerExtent,
   projectionStatusLabel,
   readVectorTileFeaturePk,
@@ -97,6 +98,11 @@ describe("readVectorTileFeaturePk", () => {
     expect(pixels.length).toBeLessThanOrEqual(10);
     expect(pixels).toContainEqual([18, 18]);
     expect(pixels).toContainEqual([0, 0]);
+  });
+
+  it("keeps selection overlays above map data layers", () => {
+    expect(overlayLayerZIndexes().selectedFeature).toBeGreaterThan(overlayLayerZIndexes().selectionSketch);
+    expect(overlayLayerZIndexes().editFeature).toBeGreaterThan(overlayLayerZIndexes().selectedFeature);
   });
 
   it("estimates a positive scale denominator from map resolution", () => {

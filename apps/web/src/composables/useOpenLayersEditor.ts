@@ -46,6 +46,17 @@ const projectionHints: Record<string, string> = {
   "EPSG:4490": "CGCS2000 经纬度；需注册投影参数后可精确转换",
   "EPSG:4547": "CGCS2000 / 3-degree GK CM 105E；需注册投影参数后可精确转换"
 };
+const selectionSketchZIndex = 900;
+const selectedFeatureZIndex = 980;
+const editFeatureZIndex = 1000;
+
+export function overlayLayerZIndexes() {
+  return {
+    selectionSketch: selectionSketchZIndex,
+    selectedFeature: selectedFeatureZIndex,
+    editFeature: editFeatureZIndex
+  };
+}
 
 export function readVectorTileFeaturePk(feature: Pick<FeatureLike, "get" | "getId">): string | null {
   const rawId = typeof feature.getId === "function" ? feature.getId() : undefined;
@@ -229,6 +240,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   });
   const editLayer = new VectorLayer({
     source: editSource,
+    zIndex: editFeatureZIndex,
     style: new Style({
       image: new CircleStyle({
         radius: 7,
@@ -241,6 +253,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   });
   const selectedFeatureLayer = new VectorLayer({
     source: selectedFeatureSource,
+    zIndex: selectedFeatureZIndex,
     style: new Style({
       image: new CircleStyle({
         radius: 7,
@@ -253,6 +266,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   });
   const selectionSketchLayer = new VectorLayer({
     source: selectionSketchSource,
+    zIndex: selectionSketchZIndex,
     style: new Style({
       fill: new Fill({ color: "rgba(96, 96, 96, 0.16)" }),
       stroke: new Stroke({
@@ -502,8 +516,18 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
           options.setStatus("选择范围内没有可查询要素", "warning");
           return;
         }
-        loadSelectedFeatures(result.features ?? []);
-        options.setStatus(`范围选择完成：高亮 ${ids.length} 个要素`, "success");
+        const highlightedCount = loadSelectedFeatures(result.features ?? []);
+        if (highlightedCount === 0) {
+          const renderedMatches = findFeaturesInSelectionGeometry(selectionGeometry)
+            .filter(({ layer }) => layer.id === serverLayer.id);
+          loadRenderedSelectionFeatures(renderedMatches);
+        }
+        const actualHighlightedCount = selectedFeatureSource.getFeatures().length;
+        if (actualHighlightedCount === 0) {
+          options.setStatus(`范围选择匹配 ${ids.length} 个要素，但没有可用于高亮的几何`, "warning");
+          return;
+        }
+        options.setStatus(`范围选择完成：高亮 ${actualHighlightedCount} 个要素`, "success");
         return;
       } catch (error) {
         options.setStatus(
@@ -539,7 +563,12 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     const ids = uniqueFeatureIds(layerGroups.get(selectedLayerId) ?? []);
     loadRenderedSelectionFeatures(matches.filter(({ layer }) => layer.id === selectedLayerId));
-    options.setStatus(`范围选择完成：高亮 ${ids.length} 个已渲染要素`, "success");
+    const actualHighlightedCount = selectedFeatureSource.getFeatures().length;
+    if (actualHighlightedCount === 0) {
+      options.setStatus(`范围选择匹配 ${ids.length} 个要素，但没有可用于高亮的几何`, "warning");
+      return;
+    }
+    options.setStatus(`范围选择完成：高亮 ${actualHighlightedCount} 个已渲染要素`, "success");
   }
 
   function findFeaturesInSelectionGeometry(selectionGeometry: Geometry) {
@@ -680,6 +709,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       }) as Feature<Geometry>;
       selectedFeatureSource.addFeature(parsed);
     }
+    return selectedFeatureSource.getFeatures().length;
   }
 
   function loadRenderedSelectionFeatures(matches: Array<{ feature: FeatureLike; layer: LayerRegistration }>) {
