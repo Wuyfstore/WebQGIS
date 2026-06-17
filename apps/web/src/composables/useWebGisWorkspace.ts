@@ -1,7 +1,7 @@
 import { computed, reactive, shallowRef } from "vue";
 import { useTitle } from "@vueuse/core";
 import { apiGet, apiSend } from "../api";
-import { getEditableFields, getLayerStatus } from "../utils/layer";
+import { getEditableFields, getLayerStatus, isPostgisLayer } from "../utils/layer";
 import type {
   Datasource,
   DatasourceForm,
@@ -330,7 +330,7 @@ export function useWebGisWorkspace() {
 
   async function readFeature(layerId: string, pk: string) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable || layer.sourceType !== "postgis") {
+    if (!layer?.queryable || !isPostgisLayer(layer)) {
       setStatus("当前图层不可查询", "warning");
       return undefined;
     }
@@ -374,7 +374,7 @@ export function useWebGisWorkspace() {
 
   async function openAttributeTable(layerId: string, queryPatch: Partial<AttributeTableQuery> = {}) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable || layer.sourceType !== "postgis") {
+    if (!layer?.queryable || !isPostgisLayer(layer)) {
       setStatus("当前图层不可打开属性表", "warning");
       return;
     }
@@ -411,7 +411,7 @@ export function useWebGisWorkspace() {
 
   async function selectFeatureIdsByGeometry(layerId: string, geometry: unknown) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable || layer.sourceType !== "postgis") {
+    if (!layer?.queryable || !isPostgisLayer(layer)) {
       setStatus("当前图层不可执行范围选择", "warning");
       return [];
     }
@@ -449,7 +449,7 @@ export function useWebGisWorkspace() {
 
   async function runLayerSqlQuery(layerId: string, sql: string, limit: number) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.queryable || layer.sourceType !== "postgis") {
+    if (!layer?.queryable || !isPostgisLayer(layer)) {
       setStatus("当前图层不可执行 SQL 查询", "warning");
       return undefined;
     }
@@ -463,7 +463,7 @@ export function useWebGisWorkspace() {
 
   async function calculateLayerAttribute(layerId: string, payload: AttributeCalculationPayload) {
     const layer = layers.value.find((item) => item.id === layerId);
-    if (!layer?.editable || layer.sourceType !== "postgis") {
+    if (!layer?.editable || !isPostgisLayer(layer)) {
       setStatus("当前图层不可执行属性计算", "warning");
       return undefined;
     }
@@ -484,7 +484,7 @@ export function useWebGisWorkspace() {
 
   async function saveFeature() {
     const layer = activeLayer.value;
-    if (!layer?.editable || layer.sourceType !== "postgis" || !draftGeometry.value) {
+    if (!layer?.editable || !isPostgisLayer(layer) || !draftGeometry.value) {
       setStatus("没有可保存的编辑内容", "warning");
       return undefined;
     }
@@ -504,7 +504,7 @@ export function useWebGisWorkspace() {
 
   async function deleteSelectedFeature() {
     const layer = activeLayer.value;
-    if (!layer?.editable || layer.sourceType !== "postgis" || !selectedFeatureId.value) {
+    if (!layer?.editable || !isPostgisLayer(layer) || !selectedFeatureId.value) {
       setStatus("没有可删除的已选要素", "warning");
       return false;
     }

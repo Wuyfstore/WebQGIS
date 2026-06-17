@@ -59,6 +59,11 @@ type SpatialRefSysRow = {
   proj4text: string | null;
 };
 
+type GeometryProfile = {
+  srid: number | null;
+  geometry_type: string | null;
+};
+
 const supportedGeometryTypes = new Set<GeometryKind>([
   "GEOMETRY",
   "POINT",
@@ -152,8 +157,16 @@ export class PostgisRepository implements OnApplicationShutdown {
     const layers: LayerRegistration[] = [];
     for (const [index, row] of spatialResult.rows.entries()) {
       const fields = await this.scanFields(pool, row);
-      const extent = await this.scanExtent(pool, row);
-      const editableReason = this.buildEditableReason(row);
+      const geometryProfile = await this.scanGeometryProfile(pool, row);
+      const profiledRow: SpatialTableRow = {
+        ...row,
+        srid: row.srid ?? geometryProfile.srid,
+        geometry_type: row.geometry_type === "GEOMETRY" && geometryProfile.geometry_type
+          ? geometryProfile.geometry_type
+          : row.geometry_type
+      };
+      const extent = await this.scanExtent(pool, profiledRow);
+      const editableReason = this.buildEditableReason(profiledRow);
       const id = `${config.id}_${row.table_schema}_${row.table_name}_${row.geometry_column}`
         .replace(/[^A-Za-z0-9_-]/g, "_");
       layers.push({
@@ -162,16 +175,16 @@ export class PostgisRepository implements OnApplicationShutdown {
         schema: row.table_schema,
         table: row.table_name,
         geometryColumn: row.geometry_column,
-        geometryType: row.geometry_type,
-        srid: row.srid,
-        primaryKey: row.primary_key,
+        geometryType: profiledRow.geometry_type,
+        srid: profiledRow.srid,
+        primaryKey: profiledRow.primary_key,
         fields,
-        hasSpatialIndex: row.has_spatial_index,
-        canSelect: row.can_select,
-        canInsert: row.can_insert,
-        canUpdate: row.can_update,
-        canDelete: row.can_delete,
-        queryable: row.can_select && Boolean(row.primary_key),
+        hasSpatialIndex: profiledRow.has_spatial_index,
+        canSelect: profiledRow.can_select,
+        canInsert: profiledRow.can_insert,
+        canUpdate: profiledRow.can_update,
+        canDelete: profiledRow.can_delete,
+        queryable: profiledRow.can_select,
         editable: editableReason.length === 0,
         editableReason,
         tileUrl: `/api/layers/${id}/tile/{z}/{x}/{y}.mvt`,
@@ -237,16 +250,17 @@ export class PostgisRepository implements OnApplicationShutdown {
   async readFeature(config: DatasourceConfig, layer: LayerRegistration, pk: string) {
     this.assertQueryableLayer(layer);
     const pool = this.getPool(config);
+    const idPredicate = this.buildFeatureIdPredicate(layer, 3);
     const result = await pool.query(
       `
       select jsonb_build_object(
         'type', 'Feature',
-        'id', ${quoteIdent(layer.primaryKey!)},
-        'geometry', ST_AsGeoJSON(ST_Transform(${quoteIdent(layer.geometryColumn)}, 4326))::jsonb,
-        'properties', to_jsonb(t) - $1 - $2
+        'id', ${this.featureIdSql(layer)},
+        'geometry', ST_AsGeoJSON(ST_Transform(${this.geometrySql(layer)}, 4326))::jsonb,
+        'properties', to_jsonb(t) - $1 - coalesce($2, '')
       ) as feature
       from ${qualifiedTable(layer)} t
-      where ${quoteIdent(layer.primaryKey!)}::text = $3
+      where ${idPredicate}
       limit 1
       `,
       [layer.geometryColumn, layer.primaryKey, pk]
@@ -267,6 +281,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     const offset = Number(query.offset);
     const search = (query.search ?? "").trim();
     const ids = [...new Set((query.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+    const sortSql = this.readFeatureSortSql(layer, query.sort);
     const values: unknown[] = [layer.geometryColumn];
     if (search) {
       values.push(`%${search}%`);
@@ -280,20 +295,20 @@ export class PostgisRepository implements OnApplicationShutdown {
     values.push(limit, offset);
     const filters = [
       search ? "to_jsonb(t)::text ilike $2" : "",
-      idValuesIndex ? `${quoteIdent(layer.primaryKey!)}::text = any($${idValuesIndex}::text[])` : ""
+      idValuesIndex ? this.buildFeatureIdArrayPredicate(layer, idValuesIndex) : ""
     ].filter(Boolean);
     const whereClause = filters.length > 0 ? `where ${filters.join(" and ")}` : "";
     const result = await pool.query<{ feature: FeatureSummary }>(
       `
       select jsonb_build_object(
         'type', 'Feature',
-        'id', ${quoteIdent(layer.primaryKey!)},
+        'id', ${this.featureIdSql(layer)},
         'geometry', null,
         'properties', to_jsonb(t) - $1
       ) as feature
       from ${qualifiedTable(layer)} t
       ${whereClause}
-      order by ${quoteIdent(sortColumn)}::text ${orderDirection}, ${quoteIdent(layer.primaryKey!)}::text asc
+      order by ${sortSql} ${orderDirection}, ${this.featureIdSql(layer)} asc
       limit $${limitIndex}
       offset $${offsetIndex}
       `,
@@ -307,20 +322,14 @@ export class PostgisRepository implements OnApplicationShutdown {
     }
     if (ids.length > 0) {
       countValues.push(ids);
-      countFilters.push(`${quoteIdent(layer.primaryKey!)}::text = any($${countValues.length}::text[])`);
+      countFilters.push(this.buildFeatureIdArrayPredicate(layer, countValues.length));
     }
-    const countWhereClause = countFilters.length > 0 ? `where ${countFilters.join(" and ")}` : "";
-    const countResult = await pool.query<{ total: string }>(
-      `
-      select count(*)::text as total
-      from ${qualifiedTable(layer)} t
-      ${countWhereClause}
-      `,
-      countValues
-    );
+    const total = countFilters.length > 0
+      ? await this.countFilteredFeatures(pool, layer, countFilters, countValues)
+      : await this.estimateTableRows(pool, layer);
     return {
       items: result.rows.map((row) => row.feature),
-      total: Number(countResult.rows[0]?.total ?? 0),
+      total,
       limit,
       offset
     };
@@ -332,7 +341,6 @@ export class PostgisRepository implements OnApplicationShutdown {
     payload: FeatureSelectionPayload
   ): Promise<FeatureSelectionResult> {
     this.assertQueryableLayer(layer);
-    this.assertLayerSrid(layer);
     if (!payload.geometry) {
       throw new BadRequestException("Selection geometry is required");
     }
@@ -344,25 +352,26 @@ export class PostgisRepository implements OnApplicationShutdown {
       with selection as (
         select ST_Transform(
           ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)),
-          $2
-        ) as geom
+          ${this.effectiveSrid(layer)}
+        ) as selection_geom
       ),
       matches as (
-        select ${quoteIdent(layer.primaryKey!)}::text as id
+        select ${this.featureIdSql(layer)} as id
         from ${qualifiedTable(layer)} t, selection
-        where ${quoteIdent(layer.geometryColumn)} is not null
-          and ST_Intersects(${quoteIdent(layer.geometryColumn)}, selection.geom)
-        order by ${quoteIdent(layer.primaryKey!)}::text asc
+        where t.${quoteIdent(layer.geometryColumn)} is not null
+          and ${this.geometrySql(layer)} && selection.selection_geom
+          and ST_Intersects(${this.geometrySql(layer)}, selection.selection_geom)
+        order by ${this.featureIdSql(layer)} asc
       )
-      select id, count(*) over()::text as total
+      select id
       from matches
-      limit $3
+      limit $2
       `,
-      [geometryJson, layer.srid, limit]
+      [geometryJson, limit]
     );
     return {
       ids: result.rows.map((row) => row.id),
-      total: Number(result.rows[0]?.total ?? 0),
+      total: result.rows.length,
       limit
     };
   }
@@ -383,7 +392,7 @@ export class PostgisRepository implements OnApplicationShutdown {
       .join(", ");
     const values = [
       ...propertyEntries.map((_, index) => `$${index + 1}`),
-      `ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($${geometryIndex}), 4326), ${layer.srid})`
+      `ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($${geometryIndex}), 4326), ${this.effectiveSrid(layer)})`
     ].join(", ");
     const queryValues = [
       ...propertyEntries.map(([, value]) => value),
@@ -394,7 +403,7 @@ export class PostgisRepository implements OnApplicationShutdown {
       `
       insert into ${qualifiedTable(layer)} (${columns})
       values (${values})
-      returning ${quoteIdent(layer.primaryKey!)} as id
+      returning ${this.featureIdSql(layer, false)} as id
       `,
       queryValues
     );
@@ -472,7 +481,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     if (payload.geometry) {
       const geometryIndex = values.length + 1;
       setParts.push(
-        `${quoteIdent(layer.geometryColumn)} = ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($${geometryIndex}), 4326), ${layer.srid})`
+        `${quoteIdent(layer.geometryColumn)} = ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($${geometryIndex}), 4326), ${this.effectiveSrid(layer)})`
       );
       values.push(JSON.stringify(payload.geometry));
     }
@@ -480,16 +489,19 @@ export class PostgisRepository implements OnApplicationShutdown {
       return this.readFeature(config, layer, pk);
     }
     values.push(pk);
+    const idPredicate = this.buildFeatureIdPredicate(layer, values.length);
     const pool = this.getPool(config);
-    await pool.query(
+    const result = await pool.query<{ id: string }>(
       `
       update ${qualifiedTable(layer)}
       set ${setParts.join(", ")}
-      where ${quoteIdent(layer.primaryKey!)}::text = $${values.length}
+      where ${idPredicate}
+      returning ${this.featureIdSql(layer, false)} as id
       `,
       values
     );
-    return this.readFeature(config, layer, pk);
+    const nextId = result.rows[0]?.id ?? pk;
+    return this.readFeature(config, layer, String(nextId));
   }
 
   async deleteFeature(
@@ -500,7 +512,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     this.assertEditableLayer(layer);
     const pool = this.getPool(config);
     await pool.query(
-      `delete from ${qualifiedTable(layer)} where ${quoteIdent(layer.primaryKey!)}::text = $1`,
+      `delete from ${qualifiedTable(layer)} t where ${this.buildFeatureIdPredicate(layer, 1)}`,
       [pk]
     );
   }
@@ -513,6 +525,8 @@ export class PostgisRepository implements OnApplicationShutdown {
     y: number
   ): Promise<Buffer> {
     const pool = this.getPool(config);
+    const sourceGeom = this.geometrySql(layer);
+    const boundsGeom = this.tileBoundsSql(layer);
     const propertyColumns = layer.fields
       .filter((field) => field.name !== layer.primaryKey)
       .slice(0, 24)
@@ -520,7 +534,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     const primaryField = layer.fields.find((field) => field.name === layer.primaryKey);
     const canUseMvtFeatureId = Boolean(primaryField && this.isIntegerField(primaryField));
     const featureIdColumn = canUseMvtFeatureId ? `${quoteIdent(layer.primaryKey!)}::bigint as mvt_feature_id` : "null::bigint as mvt_feature_id";
-    const idPropertyColumn = layer.primaryKey ? `${quoteIdent(layer.primaryKey)} as id` : "null as id";
+    const idPropertyColumn = `${this.featureIdSql(layer)} as id`;
     const selectColumns = [featureIdColumn, idPropertyColumn, ...propertyColumns].join(", ");
     const result = await pool.query<{ mvt: Buffer }>(
       `
@@ -531,17 +545,15 @@ export class PostgisRepository implements OnApplicationShutdown {
         select
           ${selectColumns},
           ST_AsMVTGeom(
-            ST_Transform(t.${quoteIdent(layer.geometryColumn)}, 3857),
+            ST_Transform(${sourceGeom}, 3857),
             bounds.geom,
             4096,
             64,
             true
           ) as geom
         from ${qualifiedTable(layer)} t, bounds
-        where ST_Intersects(
-          ST_Transform(t.${quoteIdent(layer.geometryColumn)}, 3857),
-          bounds.geom
-        )
+        where ${sourceGeom} && ${boundsGeom}
+          and ST_Intersects(${sourceGeom}, ${boundsGeom})
       )
       select ST_AsMVT(mvtgeom.*, $4, 4096, 'geom', 'mvt_feature_id') as mvt
       from mvtgeom
@@ -565,14 +577,57 @@ export class PostgisRepository implements OnApplicationShutdown {
     try {
       const result = await pool.query<{ extent: string | null }>(
         `
-        select ST_Extent(ST_Transform(${quoteIdent(row.geometry_column)}, 4326))::text as extent
-        from ${quoteIdent(row.table_schema)}.${quoteIdent(row.table_name)}
-        where ${quoteIdent(row.geometry_column)} is not null
-        `
+        with estimated as (
+          select ST_EstimatedExtent($1, $2, $3) as box
+        ),
+        envelope as (
+          select ST_Transform(
+            ST_SetSRID(
+              ST_MakeEnvelope(
+                ST_XMin(box),
+                ST_YMin(box),
+                ST_XMax(box),
+                ST_YMax(box)
+              ),
+              $4
+            ),
+            4326
+          ) as geom
+          from estimated
+          where box is not null
+        )
+        select ST_Extent(geom)::text as extent
+        from envelope
+        `,
+        [row.table_schema, row.table_name, row.geometry_column, this.effectiveSrid({ srid: row.srid } as LayerRegistration)]
       );
       return this.parseExtent(result.rows[0]?.extent ?? null);
     } catch {
       return this.parseExtent(row.extent);
+    }
+  }
+
+  private async scanGeometryProfile(pool: Pool, row: SpatialTableRow): Promise<GeometryProfile> {
+    if (row.srid && row.srid > 0 && row.geometry_type !== "GEOMETRY") {
+      return {
+        srid: row.srid,
+        geometry_type: row.geometry_type
+      };
+    }
+    try {
+      const result = await pool.query<GeometryProfile>(
+        `
+        select
+          nullif(ST_SRID(${quoteIdent(row.geometry_column)}), 0) as srid,
+          upper(GeometryType(${quoteIdent(row.geometry_column)})) as geometry_type
+        from ${quoteIdent(row.table_schema)}.${quoteIdent(row.table_name)}
+        where ${quoteIdent(row.geometry_column)} is not null
+        limit 1
+        `
+      );
+      return result.rows[0] ?? { srid: null, geometry_type: null };
+    } catch {
+      return { srid: null, geometry_type: null };
     }
   }
 
@@ -600,9 +655,6 @@ export class PostgisRepository implements OnApplicationShutdown {
 
   private buildEditableReason(row: SpatialTableRow): string[] {
     const reasons: string[] = [];
-    if (!row.primary_key) {
-      reasons.push("缺少单字段主键");
-    }
     if (!row.srid || row.srid <= 0) {
       reasons.push("geometry 字段缺少有效 SRID");
     }
@@ -658,14 +710,24 @@ export class PostgisRepository implements OnApplicationShutdown {
   }
 
   private readFeatureSortColumn(layer: LayerRegistration, sort?: string): string {
-    if (!sort) {
+    if (!sort && layer.primaryKey) {
       return layer.primaryKey!;
+    }
+    if (!sort) {
+      return layer.fields[0]?.name ?? layer.geometryColumn;
     }
     const allowedColumns = new Set([
       layer.primaryKey,
       ...layer.fields.map((field) => field.name)
     ].filter(Boolean));
-    return allowedColumns.has(sort) ? sort : layer.primaryKey!;
+    return allowedColumns.has(sort) ? sort : layer.primaryKey ?? layer.fields[0]?.name ?? layer.geometryColumn;
+  }
+
+  private readFeatureSortSql(layer: LayerRegistration, sort?: string): string {
+    if (!sort && !layer.primaryKey) {
+      return "t.ctid";
+    }
+    return `${quoteIdent(this.readFeatureSortColumn(layer, sort))}::text`;
   }
 
   private toBadRequest<T>(task: () => T): T {
@@ -677,8 +739,8 @@ export class PostgisRepository implements OnApplicationShutdown {
   }
 
   private assertQueryableLayer(layer: LayerRegistration): void {
-    if (!layer.primaryKey) {
-      throw new BadRequestException("Layer has no primary key");
+    if (!layer.canSelect) {
+      throw new BadRequestException("Layer is not queryable");
     }
   }
 
@@ -689,8 +751,76 @@ export class PostgisRepository implements OnApplicationShutdown {
   }
 
   private assertEditableLayer(layer: LayerRegistration): void {
-    if (!layer.editable || !layer.primaryKey) {
+    if (!layer.editable) {
       throw new BadRequestException(layer.editableReason.join("、") || "Layer is not editable");
     }
+  }
+
+  private effectiveSrid(layer: LayerRegistration): number {
+    return layer.srid && layer.srid > 0 ? layer.srid : 4326;
+  }
+
+  private geometrySql(layer: LayerRegistration): string {
+    const geom = `t.${quoteIdent(layer.geometryColumn)}`;
+    if (layer.srid && layer.srid > 0) {
+      return geom;
+    }
+    return `ST_SetSRID(${geom}, ${this.effectiveSrid(layer)})`;
+  }
+
+  private tileBoundsSql(layer: LayerRegistration): string {
+    return this.effectiveSrid(layer) === 3857
+      ? "bounds.geom"
+      : `ST_Transform(bounds.geom, ${this.effectiveSrid(layer)})`;
+  }
+
+  private featureIdSql(layer: LayerRegistration, withTableAlias = true): string {
+    const tablePrefix = withTableAlias ? "t." : "";
+    return layer.primaryKey ? `${tablePrefix}${quoteIdent(layer.primaryKey)}::text` : `${tablePrefix}ctid::text`;
+  }
+
+  private buildFeatureIdPredicate(layer: LayerRegistration, paramIndex: number): string {
+    return layer.primaryKey
+      ? `${this.featureIdSql(layer)} = $${paramIndex}`
+      : `t.ctid = $${paramIndex}::tid`;
+  }
+
+  private buildFeatureIdArrayPredicate(layer: LayerRegistration, paramIndex: number): string {
+    return layer.primaryKey
+      ? `${this.featureIdSql(layer)} = any($${paramIndex}::text[])`
+      : `t.ctid = any($${paramIndex}::tid[])`;
+  }
+
+  private async countFilteredFeatures(
+    pool: Pool,
+    layer: LayerRegistration,
+    countFilters: string[],
+    countValues: unknown[]
+  ): Promise<number> {
+    const countWhereClause = countFilters.length > 0 ? `where ${countFilters.join(" and ")}` : "";
+    const countResult = await pool.query<{ total: string }>(
+      `
+      select count(*)::text as total
+      from ${qualifiedTable(layer)} t
+      ${countWhereClause}
+      `,
+      countValues
+    );
+    return Number(countResult.rows[0]?.total ?? 0);
+  }
+
+  private async estimateTableRows(pool: Pool, layer: LayerRegistration): Promise<number> {
+    const estimateResult = await pool.query<{ total: string | null }>(
+      `
+      select greatest(coalesce(c.reltuples, 0), 0)::bigint::text as total
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = $1
+        and c.relname = $2
+      limit 1
+      `,
+      [layer.schema, layer.table]
+    );
+    return Number(estimateResult.rows[0]?.total ?? 0);
   }
 }

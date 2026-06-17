@@ -3,6 +3,7 @@ import {
   getEditableFields,
   getGeometryModes,
   getLayerStatus,
+  isPostgisLayer,
   isNumericField
 } from "./layer";
 import type { LayerRegistration } from "../types/gis";
@@ -68,6 +69,13 @@ describe("layer utilities", () => {
       editable: false,
       editableReason: ["缺少单字段主键", "geometry 字段缺少有效 SRID"]
     }))).toBe("缺少单字段主键、geometry 字段缺少有效 SRID");
+  });
+
+  it("treats backend layers without sourceType as PostGIS layers", () => {
+    const layer = createLayer({ sourceType: undefined });
+
+    expect(isPostgisLayer(layer)).toBe(true);
+    expect(getEditableFields(layer).map((field) => field.name)).toEqual(["name"]);
   });
 
   it("detects numeric database field types", () => {

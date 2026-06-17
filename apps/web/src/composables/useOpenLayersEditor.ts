@@ -31,6 +31,7 @@ import type { EventsKey } from "ol/events";
 import type { Extent } from "ol/extent";
 import type { Pixel } from "ol/pixel";
 import type { GeoJsonFeature, GeometryMode, LayerRegistration } from "../types/gis";
+import { isPostgisLayer } from "../utils/layer";
 
 export type MapTool = "select" | "pan" | "identify" | "node" | "draw";
 export type SelectionMode = "click" | "extent" | "customExtent";
@@ -632,13 +633,13 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
   function findSelectionQueryLayer() {
     const active = options.activeLayer.value;
-    if (active && options.visibleLayerIds.value.has(active.id) && active.queryable && active.sourceType === "postgis") {
+    if (active && options.visibleLayerIds.value.has(active.id) && active.queryable && isPostgisLayer(active)) {
       return active;
     }
     return options.layers.value.find((layer) => (
       options.visibleLayerIds.value.has(layer.id)
       && layer.queryable
-      && layer.sourceType === "postgis"
+      && isPostgisLayer(layer)
     ));
   }
 

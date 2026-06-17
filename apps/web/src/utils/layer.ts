@@ -1,7 +1,11 @@
 import type { FieldMeta, LayerRegistration } from "../types/gis";
 
+export function isPostgisLayer(layer?: LayerRegistration): boolean {
+  return Boolean(layer && (layer.sourceType ?? "postgis") === "postgis");
+}
+
 export function getEditableFields(layer?: LayerRegistration): FieldMeta[] {
-  if (layer?.sourceType && layer.sourceType !== "postgis") {
+  if (!isPostgisLayer(layer)) {
     return [];
   }
   return layer?.fields.filter((field) => field.editable) ?? [];
@@ -11,7 +15,7 @@ export function getLayerStatus(layer?: LayerRegistration): string {
   if (!layer) {
     return "请选择图层";
   }
-  if (layer.sourceType && layer.sourceType !== "postgis") {
+  if (!isPostgisLayer(layer)) {
     return "Web 栅格图层只读";
   }
   if (layer.editable) {
@@ -30,7 +34,7 @@ export function isNumericField(dataType: string): boolean {
 }
 
 export function getGeometryModes(layer?: LayerRegistration): Array<"Point" | "LineString" | "Polygon"> {
-  if (layer?.sourceType && layer.sourceType !== "postgis") {
+  if (!isPostgisLayer(layer)) {
     return [];
   }
   const type = layer?.geometryType.toUpperCase() ?? "";

@@ -84,6 +84,19 @@ describe("safe SQL helpers", () => {
     expect(buildSafeWhereExpression(layer, '"adcode" is not null')).toBe('"adcode" is not null');
   });
 
+  it("allows field based expressions for ctid-backed queryable layers", () => {
+    const ctidLayer: LayerRegistration = {
+      ...layer,
+      primaryKey: null,
+      fields: layer.fields.filter((field) => field.name !== "id"),
+      queryable: true,
+      editable: true
+    };
+
+    expect(buildSafeWhereExpression(ctidLayer, '"adcode" is not null')).toBe('"adcode" is not null');
+    expect(() => buildSafeWhereExpression(ctidLayer, '"id" is not null')).toThrow("Unknown field");
+  });
+
   it("rejects unsafe calculation expressions", () => {
     expect(() => buildSafeAttributeExpression(layer, 'pg_sleep(10)')).toThrow("Unsafe expression");
     expect(() => buildSafeAttributeExpression(layer, '"missing" + 1')).toThrow("Unknown field");
