@@ -11,6 +11,7 @@ import type {
   CrsDefinition,
   CustomCrsPayload,
   FeaturePage,
+  FeatureSelectionResult,
   FeatureSummary,
   GeoJsonFeature,
   LayerRegistration,
@@ -408,6 +409,29 @@ export function useWebGisWorkspace() {
     setStatus(`范围选择完成：匹配 ${ids.length} 个要素，已在属性表中显示`, "success");
   }
 
+  async function selectFeatureIdsByGeometry(layerId: string, geometry: unknown) {
+    const layer = layers.value.find((item) => item.id === layerId);
+    if (!layer?.queryable || layer.sourceType !== "postgis") {
+      setStatus("当前图层不可执行范围选择", "warning");
+      return [];
+    }
+    activeLayerId.value = layer.id;
+    busy.value = true;
+    try {
+      const result = await apiSend<FeatureSelectionResult>(
+        `/api/layers/${layer.id}/features/select`,
+        "POST",
+        { geometry, limit: 500 }
+      );
+      return result.ids;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "范围选择失败", "danger");
+      throw error;
+    } finally {
+      busy.value = false;
+    }
+  }
+
   async function updateAttributeTableQuery(queryPatch: Partial<AttributeTableQuery>) {
     const layer = attributeTableLayer.value;
     if (!layer) {
@@ -560,6 +584,7 @@ export function useWebGisWorkspace() {
     readFeature,
     openAttributeTable,
     openAttributeTableForFeatureIds,
+    selectFeatureIdsByGeometry,
     updateAttributeTableQuery,
     runLayerSqlQuery,
     calculateLayerAttribute,

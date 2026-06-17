@@ -11,7 +11,9 @@ import {
   projectionStatusLabel,
   readVectorTileFeaturePk,
   selectionModeStatus,
-  uniqueFeatureIds
+  uniqueFeatureIds,
+  writeSelectionGeometryObject,
+  buildSelectionSamplePixels
 } from "./useOpenLayersEditor";
 
 function createFeatureStub(id: string | number | undefined, propertyId: unknown = undefined): Pick<FeatureLike, "get" | "getId"> {
@@ -75,6 +77,26 @@ describe("readVectorTileFeaturePk", () => {
 
   it("deduplicates range selection feature ids before opening the attribute table", () => {
     expect(uniqueFeatureIds(["1024", "1024", " 1025 ", "", null, undefined, 1026])).toEqual(["1024", "1025", "1026"]);
+  });
+
+  it("writes selection geometry as EPSG:4326 GeoJSON for server-side spatial selection", () => {
+    const sourceExtent: [number, number, number, number] = [100, 20, 110, 30];
+    const selection = fromExtent(transformExtent(sourceExtent, "EPSG:4326", "EPSG:3857"));
+
+    const geometry = writeSelectionGeometryObject(selection) as { type: string; coordinates: number[][][] };
+    const firstCoordinate = geometry.coordinates[0][0];
+
+    expect(geometry.type).toBe("Polygon");
+    expect(firstCoordinate[0]).toBeCloseTo(sourceExtent[0], 5);
+    expect(firstCoordinate[1]).toBeCloseTo(sourceExtent[1], 5);
+  });
+
+  it("samples pixels across a selection box for rendered feature fallback", () => {
+    const pixels = buildSelectionSamplePixels([0, 0], [36, 36], { step: 18, maxSamples: 10 });
+
+    expect(pixels.length).toBeLessThanOrEqual(10);
+    expect(pixels).toContainEqual([18, 18]);
+    expect(pixels).toContainEqual([0, 0]);
   });
 
   it("estimates a positive scale denominator from map resolution", () => {

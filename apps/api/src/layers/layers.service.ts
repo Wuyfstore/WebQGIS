@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatasourcesRepository } from "../datasources/datasources.repository.js";
 import { PostgisRepository } from "../postgis/postgis.repository.js";
-import type { FeaturePageQuery, FeaturePayload, LayerRegistration, LayerStyle } from "../types.js";
+import type { FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, LayerRegistration, LayerStyle } from "../types.js";
 import { AttributeCalculationDto } from "./dto/attribute-calculation.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
 import { SqlQueryDto } from "./dto/sql-query.dto.js";
@@ -48,6 +48,12 @@ export class LayersService {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
     return this.postgisRepository.calculateAttribute(datasource, layer, dto);
+  }
+
+  async selectFeatures(layerId: string, payload: FeatureSelectionPayload) {
+    const layer = await this.getRequiredLayer(layerId);
+    const datasource = await this.getRequiredDatasource(layer.datasourceId);
+    return this.postgisRepository.selectFeatures(datasource, layer, payload);
   }
 
   async createFeature(layerId: string, payload: FeaturePayload) {

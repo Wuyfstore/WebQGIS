@@ -21,6 +21,12 @@ export type FeaturePage = {
   offset: number;
 };
 
+export type FeatureSelectionResult = {
+  ids: string[];
+  total: number;
+  limit: number;
+};
+
 export type SqlQueryResult = {
   columns: string[];
   rows: Record<string, unknown>[];

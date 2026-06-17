@@ -5,6 +5,8 @@ import type {
   FeaturePage,
   FeaturePageQuery,
   FeaturePayload,
+  FeatureSelectionPayload,
+  FeatureSelectionResult,
   FeatureSummary,
   FieldMeta,
   GeometryKind,
@@ -324,6 +326,47 @@ export class PostgisRepository implements OnApplicationShutdown {
     };
   }
 
+  async selectFeatures(
+    config: DatasourceConfig,
+    layer: LayerRegistration,
+    payload: FeatureSelectionPayload
+  ): Promise<FeatureSelectionResult> {
+    this.assertQueryableLayer(layer);
+    this.assertLayerSrid(layer);
+    if (!payload.geometry) {
+      throw new BadRequestException("Selection geometry is required");
+    }
+    const limit = Math.max(1, Math.min(500, Number(payload.limit) || 500));
+    const geometryJson = JSON.stringify(payload.geometry);
+    const pool = this.getPool(config);
+    const result = await pool.query<{ id: string; total: string }>(
+      `
+      with selection as (
+        select ST_Transform(
+          ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)),
+          $2
+        ) as geom
+      ),
+      matches as (
+        select ${quoteIdent(layer.primaryKey!)}::text as id
+        from ${qualifiedTable(layer)} t, selection
+        where ${quoteIdent(layer.geometryColumn)} is not null
+          and ST_Intersects(${quoteIdent(layer.geometryColumn)}, selection.geom)
+        order by ${quoteIdent(layer.primaryKey!)}::text asc
+      )
+      select id, count(*) over()::text as total
+      from matches
+      limit $3
+      `,
+      [geometryJson, layer.srid, limit]
+    );
+    return {
+      ids: result.rows.map((row) => row.id),
+      total: Number(result.rows[0]?.total ?? 0),
+      limit
+    };
+  }
+
   async createFeature(
     config: DatasourceConfig,
     layer: LayerRegistration,
@@ -636,6 +679,12 @@ export class PostgisRepository implements OnApplicationShutdown {
   private assertQueryableLayer(layer: LayerRegistration): void {
     if (!layer.primaryKey) {
       throw new BadRequestException("Layer has no primary key");
+    }
+  }
+
+  private assertLayerSrid(layer: LayerRegistration): void {
+    if (!layer.srid || layer.srid <= 0) {
+      throw new BadRequestException("Layer has no valid SRID");
     }
   }
 

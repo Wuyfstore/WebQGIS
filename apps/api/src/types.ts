@@ -72,6 +72,17 @@ export type FeaturePayload = {
   properties?: Record<string, unknown>;
 };
 
+export type FeatureSelectionPayload = {
+  geometry: unknown;
+  limit: number;
+};
+
+export type FeatureSelectionResult = {
+  ids: string[];
+  total: number;
+  limit: number;
+};
+
 export type FeatureSummary = {
   type: "Feature";
   id: string | number | null;

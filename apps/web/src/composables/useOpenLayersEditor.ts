@@ -7,6 +7,7 @@ import Feature from "ol/Feature";
 import GeoJSON from "ol/format/GeoJSON";
 import MVT from "ol/format/MVT";
 import Graticule from "ol/layer/Graticule";
+import BaseLayer from "ol/layer/Layer";
 import RasterTileLayer from "ol/layer/Tile";
 import VectorTileLayer from "ol/layer/VectorTile";
 import VectorLayer from "ol/layer/Vector";
@@ -122,6 +123,41 @@ export function uniqueFeatureIds(featureIds: Array<string | number | null | unde
   return [...new Set(featureIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
 }
 
+export function writeSelectionGeometryObject(selectionGeometry: Geometry) {
+  return new GeoJSON().writeGeometryObject(selectionGeometry, {
+    dataProjection: "EPSG:4326",
+    featureProjection: "EPSG:3857"
+  });
+}
+
+export function buildSelectionSamplePixels(
+  topLeft: Pixel,
+  bottomRight: Pixel,
+  options: { step?: number; maxSamples?: number } = {}
+) {
+  const step = Math.max(4, options.step ?? 18);
+  const maxSamples = Math.max(1, options.maxSamples ?? 1600);
+  const minX = Math.min(topLeft[0], bottomRight[0]);
+  const maxX = Math.max(topLeft[0], bottomRight[0]);
+  const minY = Math.min(topLeft[1], bottomRight[1]);
+  const maxY = Math.max(topLeft[1], bottomRight[1]);
+  const pixels: Pixel[] = [];
+  const pushPixel = (x: number, y: number) => {
+    if (pixels.length < maxSamples) {
+      pixels.push([Math.round(x), Math.round(y)]);
+    }
+  };
+
+  pushPixel((minX + maxX) / 2, (minY + maxY) / 2);
+  for (let x = minX; x <= maxX; x += step) {
+    for (let y = minY; y <= maxY; y += step) {
+      pushPixel(x, y);
+    }
+  }
+  pushPixel(maxX, maxY);
+  return pixels;
+}
+
 function toCoordinatePair(coordinate: number[]): [number, number] {
   return [coordinate[0] ?? 0, coordinate[1] ?? 0];
 }
@@ -138,6 +174,7 @@ type UseOpenLayersEditorOptions = {
   coordinateAxisOrder?: Ref<CoordinateAxisOrder>;
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
   openAttributeTableForFeatureIds?: (layerId: string, featureIds: string[]) => Promise<void>;
+  selectFeatureIdsByGeometry?: (layerId: string, geometry: unknown) => Promise<string[]>;
   clearSelection?: () => void;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
 };
@@ -439,6 +476,26 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   }
 
   async function selectFeatureInGeometry(selectionGeometry: Geometry) {
+    const serverLayer = findSelectionQueryLayer();
+    if (serverLayer && options.selectFeatureIdsByGeometry) {
+      try {
+        const ids = uniqueFeatureIds(await options.selectFeatureIdsByGeometry(
+          serverLayer.id,
+          writeSelectionGeometryObject(selectionGeometry)
+        ));
+        if (ids.length === 0) {
+          options.setStatus("选择范围内没有可查询要素", "warning");
+          return;
+        }
+        await options.openAttributeTableForFeatureIds?.(serverLayer.id, ids);
+        return;
+      } catch (error) {
+        options.setStatus(
+          error instanceof Error ? `范围选择空间查询失败：${error.message}` : "范围选择空间查询失败，尝试使用已渲染瓦片",
+          "warning"
+        );
+      }
+    }
     const matches = findFeaturesInSelectionGeometry(selectionGeometry);
     if (matches.length === 0) {
       options.setStatus("选择范围内没有可查询要素", "warning");
@@ -478,7 +535,61 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
         orderedLayers.push(layer);
       }
     }
+    const renderedMatches = findRenderedFeaturesInSelectionGeometry(selectionGeometry, orderedLayers);
+    if (renderedMatches.length > 0) {
+      return renderedMatches;
+    }
     return findFeaturesInSelectionGeometryFromLayers(selectionGeometry, orderedLayers);
+  }
+
+  function findRenderedFeaturesInSelectionGeometry(
+    selectionGeometry: Geometry,
+    tileLayers: VectorTileLayer<VectorTileSource>[]
+  ) {
+    if (!map.value) {
+      return [];
+    }
+    const selectionExtent = selectionGeometry.getExtent();
+    const topLeft = map.value.getPixelFromCoordinate([selectionExtent[0], selectionExtent[3]]);
+    const bottomRight = map.value.getPixelFromCoordinate([selectionExtent[2], selectionExtent[1]]);
+    const samples = buildSelectionSamplePixels(topLeft, bottomRight);
+    const matches: { feature: FeatureLike; layer: LayerRegistration }[] = [];
+    const seen = new Set<string>();
+    const layerLookup = new Map<VectorTileLayer<VectorTileSource>, LayerRegistration>();
+    for (const tileLayer of tileLayers) {
+      const layer = findLayerByMountedLayer(tileLayer);
+      if (layer) {
+        layerLookup.set(tileLayer, layer);
+      }
+    }
+    for (const pixel of samples) {
+      map.value.forEachFeatureAtPixel(
+        pixel,
+        (feature, renderedLayer) => {
+          if (!isVectorTileLayer(renderedLayer)) {
+            return undefined;
+          }
+          const matchedLayer = layerLookup.get(renderedLayer);
+          const featureGeometry = feature.getGeometry();
+          if (!matchedLayer || !featureIntersectsSelectionGeometry(featureGeometry, selectionGeometry)) {
+            return undefined;
+          }
+          const pk = readVectorTileFeaturePk(feature);
+          const key = `${matchedLayer.id}:${pk ?? matches.length}`;
+          if (seen.has(key)) {
+            return undefined;
+          }
+          seen.add(key);
+          matches.push({ feature, layer: matchedLayer });
+          return undefined;
+        },
+        {
+          hitTolerance: 3,
+          layerFilter: (candidateLayer) => tileLayers.some((tileLayer) => tileLayer === candidateLayer)
+        }
+      );
+    }
+    return matches;
   }
 
   function findFeaturesInSelectionGeometryFromLayers(
@@ -517,6 +628,18 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       }
     }
     return undefined;
+  }
+
+  function findSelectionQueryLayer() {
+    const active = options.activeLayer.value;
+    if (active && options.visibleLayerIds.value.has(active.id) && active.queryable && active.sourceType === "postgis") {
+      return active;
+    }
+    return options.layers.value.find((layer) => (
+      options.visibleLayerIds.value.has(layer.id)
+      && layer.queryable
+      && layer.sourceType === "postgis"
+    ));
   }
 
   function loadEditableFeature(feature: GeoJsonFeature) {
@@ -803,7 +926,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   };
 }
 
-function isVectorTileLayer(layer: MountedMapLayer | undefined): layer is VectorTileLayer<VectorTileSource> {
+function isVectorTileLayer(layer: BaseLayer | MountedMapLayer | undefined): layer is VectorTileLayer<VectorTileSource> {
   return layer instanceof VectorTileLayer;
 }
 
