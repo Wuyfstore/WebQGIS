@@ -62,6 +62,7 @@ export function useWebGisWorkspace() {
   const selectedFeatureId = shallowRef<string | null>(null);
   const selectedProperties = shallowRef<Record<string, unknown>>({});
   const draftGeometry = shallowRef<unknown>(null);
+  const isDraftDirty = shallowRef(false);
   const displayProjection = shallowRef("EPSG:3857");
   const crsCatalog = shallowRef<CrsDefinition[]>([]);
   const customCrsCatalog = shallowRef<CrsDefinition[]>([]);
@@ -83,6 +84,7 @@ export function useWebGisWorkspace() {
   const activeLayer = computed(() => layers.value.find((layer) => layer.id === activeLayerId.value));
   const editableFields = computed(() => getEditableFields(activeLayer.value));
   const selectedLayerStatus = computed(() => getLayerStatus(activeLayer.value));
+  const hasUnsavedEditDraft = computed(() => Boolean(draftGeometry.value) && isDraftDirty.value);
   const visibleLayers = computed(() => layers.value.filter((layer) => visibleLayerIds.value.has(layer.id)));
   const attributeTableLayer = computed(() => (
     layers.value.find((layer) => layer.id === attributeTableLayerId.value) ?? null
@@ -122,12 +124,27 @@ export function useWebGisWorkspace() {
   function setSelectedFeature(feature: GeoJsonFeature, fallbackId?: string) {
     selectedFeatureId.value = String(feature.id ?? fallbackId ?? "");
     selectedProperties.value = { ...(feature.properties ?? {}) };
+    isDraftDirty.value = false;
   }
 
   function clearDraftState() {
     selectedFeatureId.value = null;
     selectedProperties.value = {};
     draftGeometry.value = null;
+    isDraftDirty.value = false;
+  }
+
+  function clearSelectedFeatureState() {
+    selectedFeatureId.value = null;
+    selectedProperties.value = {};
+  }
+
+  function markDraftDirty() {
+    isDraftDirty.value = true;
+  }
+
+  function markDraftClean() {
+    isDraftDirty.value = false;
   }
 
   function setDisplayProjection(nextProjection: string) {
@@ -496,6 +513,7 @@ export function useWebGisWorkspace() {
         ? await apiSend<GeoJsonFeature>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "PUT", payload)
         : await apiSend<GeoJsonFeature>(`/api/layers/${layer.id}/features`, "POST", payload);
       setSelectedFeature(saved);
+      markDraftClean();
       setStatus(`保存成功：要素 ${saved.id ?? selectedFeatureId.value ?? "已写入"} 已写入 PostGIS，图层已自动刷新`, "success");
       return saved;
     });
@@ -560,6 +578,8 @@ export function useWebGisWorkspace() {
     selectedFeatureId,
     selectedProperties,
     draftGeometry,
+    isDraftDirty,
+    hasUnsavedEditDraft,
     datasourceForm,
     editableFields,
     selectedLayerStatus,
@@ -592,7 +612,10 @@ export function useWebGisWorkspace() {
     deleteSelectedFeature,
     updateLayerStyle,
     saveWebServiceConnection,
+    clearSelectedFeatureState,
     clearDraftState,
+    markDraftDirty,
+    markDraftClean,
     setStatus
   };
 }

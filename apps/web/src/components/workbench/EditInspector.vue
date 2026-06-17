@@ -11,6 +11,10 @@ const props = defineProps<{
   selectedFeatureId: string | null;
 }>();
 
+const emit = defineEmits<{
+  propertyChange: [];
+}>();
+
 const selectedProperties = defineModel<Record<string, unknown>>("selectedProperties", { required: true });
 
 const layerName = computed(() => (
@@ -57,6 +61,7 @@ const layerGeometrySummary = computed(() => {
           :placeholder="field.dataType"
           :type="isNumericField(field.dataType) ? 'number' : 'text'"
           autocomplete="off"
+          @input="emit('propertyChange')"
         />
       </label>
     </section>

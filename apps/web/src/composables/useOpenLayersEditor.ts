@@ -200,6 +200,8 @@ type UseOpenLayersEditorOptions = {
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
   selectFeatureIdsByGeometry?: (layerId: string, geometry: unknown) => Promise<{ ids: string[]; features?: GeoJsonFeature[] }>;
   clearSelection?: () => void;
+  markDraftDirty?: () => void;
+  canDiscardDraft?: (actionLabel: string) => boolean;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
 };
 
@@ -311,7 +313,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     map.value.addInteraction(modifyInteraction);
     map.value.addInteraction(snapInteraction);
     modifyInteraction.setActive(false);
-    modifyInteraction.on("modifyend", updateDraftGeometry);
+    modifyInteraction.on("modifyend", () => updateDraftGeometry({ dirty: true }));
     mapClickKey = map.value.on(singleClickEvent, handleMapClick);
     pointerMoveKey = map.value.on(pointerMoveEvent, handlePointerMove);
     syncLayers();
@@ -503,6 +505,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     const pk = readVectorTileFeaturePk(feature);
     if (!pk) {
       options.setStatus("瓦片要素缺少主键，无法回源编辑", "warning");
+      return;
+    }
+    if (!options.canDiscardDraft?.("选择其他要素")) {
       return;
     }
     const sourceFeature = await options.readFeature(layer.id, pk);
@@ -713,6 +718,15 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     updateDraftGeometry();
   }
 
+  function clearSelectionFeatures() {
+    selectedFeatureSource.clear();
+  }
+
+  function clearEditableFeature() {
+    editSource.clear();
+    options.draftGeometry.value = null;
+  }
+
   function loadSelectedFeatures(features: GeoJsonFeature[]) {
     selectedFeatureSource.clear();
     for (const feature of features) {
@@ -761,7 +775,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     return options.activeLayer.value;
   }
 
-  function updateDraftGeometry() {
+  function updateDraftGeometry(optionsOverride: { dirty?: boolean } = {}) {
     const feature = editSource.getFeatures()[0];
     if (!feature) {
       options.draftGeometry.value = null;
@@ -772,6 +786,9 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       featureProjection: "EPSG:3857"
     }) as GeoJsonFeature;
     options.draftGeometry.value = geojson.geometry;
+    if (optionsOverride.dirty) {
+      options.markDraftDirty?.();
+    }
   }
 
   function clearDraft() {
@@ -803,7 +820,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     drawInteraction.on("drawend", (event: DrawEvent) => {
       editSource.clear();
       window.setTimeout(() => {
-        updateDraftGeometry();
+        updateDraftGeometry({ dirty: true });
         stopDrawing();
         activateTool("node");
       }, 0);
@@ -1007,6 +1024,8 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     isDeleteDialogOpen,
     initializeMap,
     loadEditableFeature,
+    clearSelectionFeatures,
+    clearEditableFeature,
     clearDraft,
     startDrawing,
     stopDrawing,

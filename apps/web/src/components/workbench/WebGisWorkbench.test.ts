@@ -192,6 +192,8 @@ const editorMock = {
   zoomLevel: shallowRef(7.25),
   initializeMap: vi.fn(),
   loadEditableFeature: vi.fn(),
+  clearSelectionFeatures: vi.fn(),
+  clearEditableFeature: vi.fn(),
   clearDraft: vi.fn(),
   startDrawing: vi.fn(),
   stopDrawing: vi.fn(),
@@ -206,8 +208,16 @@ const editorMock = {
   cancelDelete: vi.fn()
 };
 
+let editorOptions: {
+  draftGeometry: { value: unknown };
+  markDraftDirty?: () => void;
+} | null = null;
+
 vi.mock("../../composables/useOpenLayersEditor", () => ({
-  useOpenLayersEditor: () => editorMock
+  useOpenLayersEditor: (options: typeof editorOptions) => {
+    editorOptions = options;
+    return editorMock;
+  }
 }));
 
 vi.mock("../../api", () => ({
@@ -415,6 +425,7 @@ describe("WebGisWorkbench", () => {
     editorMock.projectionLabel.value = "EPSG:4326 显示 / EPSG:4326 数据源 · WGS84 经纬度显示坐标";
     editorMock.zoomLevel.value = 7.25;
     editorMock.zoomToLayerExtent.mockReturnValue(true);
+    editorOptions = null;
   });
 
   it("renders the QGIS-style shell without crashing on first entry", () => {
@@ -705,6 +716,162 @@ describe("WebGisWorkbench", () => {
     expect(wrapper.findAll(".workbench__tool")
       .find((tool) => tool.attributes("title") === "绘制面要素")
       ?.attributes("disabled")).toBeDefined();
+  });
+
+  it("clears stale selection and editable visuals before switching to range selection", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+
+    const selectTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title")?.includes("右键切换选择方式"));
+    await selectTool?.trigger("contextmenu");
+    await flushPromises();
+    await wrapper.findAll(".workbench__selection-command")[2].trigger("click");
+    await flushPromises();
+
+    expect(editorMock.clearSelectionFeatures).toHaveBeenCalled();
+    expect(editorMock.clearEditableFeature).toHaveBeenCalled();
+    expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("customExtent");
+  });
+
+  it("clears a clean editable feature when switching from edit mode to range selection", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    const selectTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title")?.includes("右键切换选择方式"));
+    await selectTool?.trigger("contextmenu");
+    await flushPromises();
+    await wrapper.findAll(".workbench__selection-command")[1].trigger("click");
+    await flushPromises();
+
+    expect(editorMock.clearSelectionFeatures).toHaveBeenCalled();
+    expect(editorMock.clearEditableFeature).toHaveBeenCalled();
+    expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("extent");
+  });
+
+  it("blocks range selection while an edit draft is dirty", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    editorOptions!.markDraftDirty?.();
+    editorMock.clearSelectionFeatures.mockClear();
+    editorMock.clearEditableFeature.mockClear();
+    editorMock.activateSelectionMode.mockClear();
+
+    const selectTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title")?.includes("右键切换选择方式"));
+    await selectTool?.trigger("contextmenu");
+    await flushPromises();
+    await wrapper.findAll(".workbench__selection-command")[1].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("切换选择方式前请先保存或清除当前编辑草稿");
+    expect(editorMock.clearSelectionFeatures).not.toHaveBeenCalled();
+    expect(editorMock.clearEditableFeature).not.toHaveBeenCalled();
+    expect(editorMock.activateSelectionMode).not.toHaveBeenCalledWith("extent");
+  });
+
+  it("marks property edits as dirty before changing selection mode", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    const propertyInput = wrapper.find<HTMLInputElement>(".edit-inspector__input");
+    await propertyInput.setValue("锦江区");
+    editorMock.clearSelectionFeatures.mockClear();
+    editorMock.clearEditableFeature.mockClear();
+    editorMock.activateSelectionMode.mockClear();
+
+    const selectTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title")?.includes("右键切换选择方式"));
+    await selectTool?.trigger("contextmenu");
+    await flushPromises();
+    await wrapper.findAll(".workbench__selection-command")[1].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("切换选择方式前请先保存或清除当前编辑草稿");
+    expect(editorMock.clearSelectionFeatures).not.toHaveBeenCalled();
+    expect(editorMock.clearEditableFeature).not.toHaveBeenCalled();
+    expect(editorMock.activateSelectionMode).not.toHaveBeenCalledWith("extent");
+  });
+
+  it("does not continue layer actions when a dirty edit draft blocks switching", async () => {
+    const wrapper = mount(WebGisWorkbench, {
+      attachTo: document.body
+    });
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper, "public.china_2025_province");
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    editorOptions!.markDraftDirty?.();
+    editorMock.clearDraft.mockClear();
+    editorMock.zoomToLayerExtent.mockClear();
+
+    await wrapper.findAll(".layer-panel__row")[0].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    contextMenuItem("缩放到图层")?.click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("切换图层前请先保存或清除当前编辑草稿");
+    expect(editorMock.clearDraft).not.toHaveBeenCalled();
+    expect(editorMock.zoomToLayerExtent).not.toHaveBeenCalledWith("province");
+
+    await wrapper.findAll(".layer-panel__row")[0].trigger("contextmenu", {
+      clientX: 160,
+      clientY: 260
+    });
+    contextMenuItem("图层样式")?.click();
+    await flushPromises();
+
+    expect(document.querySelector(".workbench__style-dialog")).toBeNull();
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
+  });
+
+  it("clears previous range highlights before switching back to click selection", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    editorMock.selectionMode.value = "extent";
+    editorMock.clearSelectionFeatures.mockClear();
+    editorMock.clearEditableFeature.mockClear();
+    editorMock.activateSelectionMode.mockClear();
+
+    const selectTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title")?.includes("右键切换选择方式"));
+    await selectTool?.trigger("contextmenu");
+    await flushPromises();
+    await wrapper.findAll(".workbench__selection-command")[0].trigger("click");
+    await flushPromises();
+
+    expect(editorMock.clearSelectionFeatures).toHaveBeenCalled();
+    expect(editorMock.clearEditableFeature).not.toHaveBeenCalled();
+    expect(editorMock.activateSelectionMode).toHaveBeenCalledWith("click");
   });
 
   it("switches active layers from the context bar and hides snap details when snapping is off", async () => {

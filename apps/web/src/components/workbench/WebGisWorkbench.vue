@@ -79,7 +79,9 @@ const editor = useOpenLayersEditor({
   coordinateAxisOrder,
   readFeature: workspace.readFeature,
   selectFeatureIdsByGeometry: workspace.selectFeatureIdsByGeometry,
-  clearSelection: workspace.clearDraftState,
+  clearSelection: workspace.clearSelectedFeatureState,
+  markDraftDirty: workspace.markDraftDirty,
+  canDiscardDraft: canDiscardCurrentDraft,
   setStatus: workspace.setStatus
 });
 
@@ -105,6 +107,7 @@ const {
   status,
   selectedFeatureId,
   selectedProperties,
+  hasUnsavedEditDraft,
   datasourceForm,
   editableFields,
   selectedLayerStatus,
@@ -399,8 +402,16 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", closeMenuOnEscape);
 });
 
-watch(activeLayerId, (nextLayerId) => {
+watch(activeLayerId, (nextLayerId, previousLayerId) => {
   if (editingLayerId.value && editingLayerId.value !== nextLayerId) {
+    if (hasUnsavedEditDraft.value) {
+      const fallbackLayerId = previousLayerId || editingLayerId.value;
+      if (fallbackLayerId && loadedLayerIds.value.has(fallbackLayerId)) {
+        activeLayerId.value = fallbackLayerId;
+      }
+      workspace.setStatus("当前编辑草稿未保存，请先保存或清除后再切换图层", "warning");
+      return;
+    }
     editingLayerId.value = null;
     handleClearDraft();
     workspace.setStatus("已切换图层，编辑模式已关闭", "neutral");
@@ -459,6 +470,15 @@ function openSelectionMenu() {
 
 function setSelectionMode(mode: SelectionMode) {
   isSelectionMenuOpen.value = false;
+  if (mode === "click") {
+    editor.clearSelectionFeatures();
+    editor.activateSelectionMode(mode);
+    return;
+  }
+  if (!canDiscardCurrentDraft("切换选择方式")) {
+    return;
+  }
+  clearSelectionVisuals();
   editor.activateSelectionMode(mode);
 }
 
@@ -561,7 +581,7 @@ function setActiveLayerFromContext(event: Event) {
   if (!layerId) {
     return;
   }
-  workspace.setActiveLayer(layerId);
+  setActiveLayerSafely(layerId);
 }
 
 function handleNewDraft() {
@@ -606,9 +626,26 @@ function handleClearDraft() {
   editor.clearDraft();
 }
 
+function clearSelectionVisuals() {
+  editor.clearSelectionFeatures();
+  workspace.clearSelectedFeatureState();
+  editor.clearEditableFeature();
+}
+
+function canDiscardCurrentDraft(actionLabel: string) {
+  if (!hasUnsavedEditDraft.value) {
+    return true;
+  }
+  workspace.setStatus(`${actionLabel}前请先保存或清除当前编辑草稿`, "warning");
+  return false;
+}
+
 function startDrawing(mode?: GeometryMode) {
   if (!isEditingActiveLayer.value) {
     workspace.setStatus("请先开启当前图层编辑后再绘制", "warning");
+    return;
+  }
+  if (!canDiscardCurrentDraft("开始绘制")) {
     return;
   }
   workspace.clearDraftState();
@@ -621,6 +658,9 @@ function toggleEditingActiveLayer() {
 }
 
 function startEditingLayer(layerId: string) {
+  if (!canDiscardCurrentDraft("切换编辑图层")) {
+    return;
+  }
   const layer = layers.value.find((item) => item.id === layerId);
   if (!layer) {
     workspace.setStatus("请先选择一个图层", "warning");
@@ -640,6 +680,9 @@ function startEditingLayer(layerId: string) {
 }
 
 function stopEditingLayer(layerId: string) {
+  if (!canDiscardCurrentDraft("关闭编辑")) {
+    return;
+  }
   const layer = layers.value.find((item) => item.id === layerId);
   if (!layer || editingLayerId.value !== layer.id) {
     return;
@@ -667,7 +710,9 @@ async function handleRefreshAll() {
 }
 
 function refreshLoadedLayer(layerId: string) {
-  workspace.setActiveLayer(layerId);
+  if (!setActiveLayerSafely(layerId)) {
+    return;
+  }
   editor.refreshLayer(layerId);
   const layer = layers.value.find((item) => item.id === layerId);
   workspace.setStatus(
@@ -691,6 +736,9 @@ async function scanFirstDatasource() {
 }
 
 async function loadLayerToMap(layerId: string) {
+  if (!canDiscardCurrentDraft("加载图层")) {
+    return;
+  }
   const layer = workspace.loadLayer(layerId);
   if (!layer) {
     return;
@@ -708,6 +756,9 @@ function clearDraggedLayer() {
 }
 
 function removeLoadedLayer(layerId: string) {
+  if (!canDiscardCurrentDraft("移除图层")) {
+    return;
+  }
   const layer = workspace.removeLayer(layerId);
   if (!layer) {
     return;
@@ -738,7 +789,7 @@ function showOnlyActiveLayer() {
     workspace.setStatus("请先选择一个图层", "warning");
     return;
   }
-  workspace.showOnlyLayer(layer.id);
+  showOnlyLayerSafely(layer.id);
 }
 
 function showAllLayers() {
@@ -746,11 +797,44 @@ function showAllLayers() {
 }
 
 function restorePreviousVisibleLayers() {
+  restorePreviousVisibleLayersSafely();
+}
+
+function setActiveLayerSafely(layerId: string) {
+  if (!canDiscardCurrentDraft("切换图层")) {
+    return false;
+  }
+  workspace.setActiveLayer(layerId);
+  editor.clearDraft();
+  return true;
+}
+
+function toggleLayerVisibilitySafely(layerId: string) {
+  workspace.toggleLayer(layerId);
+}
+
+function showOnlyLayerSafely(layerId: string) {
+  if (!canDiscardCurrentDraft("独显图层")) {
+    return false;
+  }
+  workspace.showOnlyLayer(layerId);
+  editor.clearDraft();
+  return true;
+}
+
+function restorePreviousVisibleLayersSafely() {
+  if (!canDiscardCurrentDraft("恢复图层可见性")) {
+    return false;
+  }
   workspace.restorePreviousVisibleLayers();
+  editor.clearDraft();
+  return true;
 }
 
 function zoomToLayer(layerId: string) {
-  workspace.setActiveLayer(layerId);
+  if (!setActiveLayerSafely(layerId)) {
+    return;
+  }
   editor.zoomToLayerExtent(layerId);
 }
 
@@ -801,8 +885,14 @@ function openStyleEditor(layerId: string) {
     workspace.setStatus("Web 栅格图层暂不支持服务端样式编辑", "warning");
     return;
   }
-  workspace.setActiveLayer(layerId);
+  if (!setActiveLayerSafely(layerId)) {
+    return;
+  }
   styleEditorLayerId.value = layerId;
+}
+
+function handlePropertyChange() {
+  workspace.markDraftDirty();
 }
 
 function closeStyleEditor() {
@@ -957,10 +1047,10 @@ function validateActiveLayer() {
           :visible-layer-ids="visibleLayerIds"
           :editable-layer-count="editableLayerCount"
           :can-restore-visible-layer-ids="canRestoreVisibleLayerIds"
-          @select="workspace.setActiveLayer"
-          @toggle="workspace.toggleLayer"
-          @solo="workspace.showOnlyLayer"
-          @restore-visibility="workspace.restorePreviousVisibleLayers"
+          @select="setActiveLayerSafely"
+          @toggle="toggleLayerVisibilitySafely"
+          @solo="showOnlyLayerSafely"
+          @restore-visibility="restorePreviousVisibleLayersSafely"
           @refresh-layer="refreshLoadedLayer"
           @zoom-to-layer="zoomToLayer"
           @open-attribute-table="openAttributeTable"
@@ -1002,6 +1092,7 @@ function validateActiveLayer() {
         :is-editing-layer="isEditingActiveLayer"
         :selected-layer-status="selectedLayerStatus"
         :selected-feature-id="selectedFeatureId"
+        @property-change="handlePropertyChange"
       />
     </section>
 
