@@ -280,7 +280,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     const limit = Number(query.limit);
     const offset = Number(query.offset);
     const search = (query.search ?? "").trim();
-    const ids = [...new Set((query.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+    const ids = this.normalizeFeatureIds(query.ids);
     const sortSql = this.readFeatureSortSql(layer, query.sort);
     const values: unknown[] = [layer.geometryColumn];
     if (search) {
@@ -721,6 +721,18 @@ export class PostgisRepository implements OnApplicationShutdown {
       ...layer.fields.map((field) => field.name)
     ].filter(Boolean));
     return allowedColumns.has(sort) ? sort : layer.primaryKey ?? layer.fields[0]?.name ?? layer.geometryColumn;
+  }
+
+  private normalizeFeatureIds(value: unknown): string[] {
+    const rawItems = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+    return [
+      ...new Set(
+        rawItems
+          .flatMap((item) => String(item).split(","))
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+    ];
   }
 
   private readFeatureSortSql(layer: LayerRegistration, sort?: string): string {

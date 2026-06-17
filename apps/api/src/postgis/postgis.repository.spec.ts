@@ -98,6 +98,45 @@ describe("PostgisRepository ctid-backed layers", () => {
     expect(queries.some((query) => query.includes("count(*)"))).toBe(false);
   });
 
+  it("normalizes comma separated id query strings before filtering", async () => {
+    const queries: string[] = [];
+    const queryValues: unknown[][] = [];
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string, values: unknown[] = []) => {
+        queries.push(sql);
+        queryValues.push(values);
+        if (sql.includes("count(*)")) {
+          return { rows: [{ total: "2" }] };
+        }
+        return {
+          rows: [
+            {
+              feature: {
+                type: "Feature",
+                id: "199",
+                geometry: null,
+                properties: { name: "city-199" }
+              }
+            }
+          ]
+        };
+      }
+    });
+
+    await repository.listFeatures(createDatasource(), createLayer({ primaryKey: "id" }), {
+      limit: 100,
+      offset: 0,
+      search: "",
+      order: "asc",
+      sort: "id",
+      ids: "199,228" as unknown as string[]
+    });
+
+    expect(queries[0]).toContain('t."id"::text = any($2::text[])');
+    expect(queryValues[0][1]).toEqual(["199", "228"]);
+  });
+
   it("selects rows by geometry using ctid ids when no primary key exists", async () => {
     const queries: string[] = [];
     const repository = new PostgisRepository();
