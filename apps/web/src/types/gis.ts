@@ -23,6 +23,7 @@ export type FeaturePage = {
 
 export type FeatureSelectionResult = {
   ids: string[];
+  features: GeoJsonFeature[];
   total: number;
   limit: number;
 };

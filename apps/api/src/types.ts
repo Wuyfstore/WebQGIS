@@ -67,6 +67,13 @@ export type LayerRegistration = {
   updatedAt: string;
 };
 
+export type GeoJsonFeature = {
+  type: "Feature";
+  id?: string | number | null;
+  geometry: unknown;
+  properties?: Record<string, unknown> | null;
+};
+
 export type FeaturePayload = {
   geometry?: unknown;
   properties?: Record<string, unknown>;
@@ -79,6 +86,7 @@ export type FeatureSelectionPayload = {
 
 export type FeatureSelectionResult = {
   ids: string[];
+  features: GeoJsonFeature[];
   total: number;
   limit: number;
 };

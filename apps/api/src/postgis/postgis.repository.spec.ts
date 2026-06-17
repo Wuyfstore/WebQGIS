@@ -135,15 +135,26 @@ describe("PostgisRepository ctid-backed layers", () => {
 
     expect(queries[0]).toContain('t."id"::text = any($2::text[])');
     expect(queryValues[0][1]).toEqual(["199", "228"]);
+    expect(queries.some((query) => query.includes("count(*)"))).toBe(false);
   });
 
-  it("selects rows by geometry using ctid ids when no primary key exists", async () => {
+  it("selects rows by geometry and returns highlight features using ctid ids when no primary key exists", async () => {
     const queries: string[] = [];
     const repository = new PostgisRepository();
     (repository as unknown as { getPool: () => unknown }).getPool = () => ({
       query: async (sql: string) => {
         queries.push(sql);
-        return { rows: [{ id: "(0,1)" }] };
+        return {
+          rows: [{
+            id: "(0,1)",
+            feature: {
+              type: "Feature",
+              id: "(0,1)",
+              geometry: { type: "LineString", coordinates: [[120, 31], [121, 32]] },
+              properties: {}
+            }
+          }]
+        };
       }
     });
 
@@ -156,7 +167,40 @@ describe("PostgisRepository ctid-backed layers", () => {
     });
 
     expect(result.ids).toEqual(["(0,1)"]);
+    expect(result.features).toHaveLength(1);
+    expect(result.features[0]?.id).toBe("(0,1)");
     expect(queries[0]).toContain("t.ctid::text as id");
+    expect(queries[0]).toContain("ST_AsGeoJSON(ST_Transform");
     expect(queries[0]).toContain("ST_Intersects");
+  });
+
+  it("caps vector tile candidates and keeps tile payload attributes lean", async () => {
+    const queries: string[] = [];
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [{ mvt: Buffer.from("tile") }] };
+      }
+    });
+
+    const layer = createLayer({
+      primaryKey: "id",
+      fields: [
+        { name: "id", dataType: "integer", udtName: "int4", nullable: false, defaultValue: null, editable: false },
+        { name: "name", dataType: "text", udtName: "text", nullable: true, defaultValue: null, editable: true },
+        { name: "code", dataType: "text", udtName: "text", nullable: true, defaultValue: null, editable: true },
+        { name: "kind", dataType: "text", udtName: "text", nullable: true, defaultValue: null, editable: true },
+        { name: "status", dataType: "text", udtName: "text", nullable: true, defaultValue: null, editable: true },
+        { name: "extra", dataType: "text", udtName: "text", nullable: true, defaultValue: null, editable: true }
+      ]
+    });
+
+    await repository.getVectorTile(createDatasource(), layer, 8, 210, 97);
+
+    expect(queries[0]).toContain("limit 5000");
+    expect(queries[0]).toContain('"name"');
+    expect(queries[0]).toContain('"status"');
+    expect(queries[0]).not.toContain('"extra"');
   });
 });

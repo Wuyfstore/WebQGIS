@@ -67,7 +67,6 @@ const editor = useOpenLayersEditor({
   coordinatePrecision,
   coordinateAxisOrder,
   readFeature: workspace.readFeature,
-  openAttributeTableForFeatureIds: workspace.openAttributeTableForFeatureIds,
   selectFeatureIdsByGeometry: workspace.selectFeatureIdsByGeometry,
   clearSelection: workspace.clearDraftState,
   setStatus: workspace.setStatus

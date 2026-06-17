@@ -9,6 +9,7 @@ import type {
   FeatureSelectionResult,
   FeatureSummary,
   FieldMeta,
+  GeoJsonFeature,
   GeometryKind,
   LayerRegistration,
   SqlQueryResult,
@@ -324,7 +325,9 @@ export class PostgisRepository implements OnApplicationShutdown {
       countValues.push(ids);
       countFilters.push(this.buildFeatureIdArrayPredicate(layer, countValues.length));
     }
-    const total = countFilters.length > 0
+    const total = ids.length > 0 && !search
+      ? ids.length
+      : countFilters.length > 0
       ? await this.countFilteredFeatures(pool, layer, countFilters, countValues)
       : await this.estimateTableRows(pool, layer);
     return {
@@ -347,7 +350,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     const limit = Math.max(1, Math.min(500, Number(payload.limit) || 500));
     const geometryJson = JSON.stringify(payload.geometry);
     const pool = this.getPool(config);
-    const result = await pool.query<{ id: string; total: string }>(
+    const result = await pool.query<{ id: string; feature: GeoJsonFeature }>(
       `
       with selection as (
         select ST_Transform(
@@ -356,7 +359,14 @@ export class PostgisRepository implements OnApplicationShutdown {
         ) as selection_geom
       ),
       matches as (
-        select ${this.featureIdSql(layer)} as id
+        select
+          ${this.featureIdSql(layer)} as id,
+          jsonb_build_object(
+            'type', 'Feature',
+            'id', ${this.featureIdSql(layer)},
+            'geometry', ST_AsGeoJSON(ST_Transform(${this.geometrySql(layer)}, 4326))::jsonb,
+            'properties', jsonb_build_object()
+          ) as feature
         from ${qualifiedTable(layer)} t, selection
         where t.${quoteIdent(layer.geometryColumn)} is not null
           and ${this.geometrySql(layer)} && selection.selection_geom
@@ -371,6 +381,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     );
     return {
       ids: result.rows.map((row) => row.id),
+      features: result.rows.map((row) => row.feature),
       total: result.rows.length,
       limit
     };
@@ -527,10 +538,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     const pool = this.getPool(config);
     const sourceGeom = this.geometrySql(layer);
     const boundsGeom = this.tileBoundsSql(layer);
-    const propertyColumns = layer.fields
-      .filter((field) => field.name !== layer.primaryKey)
-      .slice(0, 24)
-      .map((field) => quoteIdent(field.name));
+    const propertyColumns = this.vectorTilePropertyColumns(layer);
     const primaryField = layer.fields.find((field) => field.name === layer.primaryKey);
     const canUseMvtFeatureId = Boolean(primaryField && this.isIntegerField(primaryField));
     const featureIdColumn = canUseMvtFeatureId ? `${quoteIdent(layer.primaryKey!)}::bigint as mvt_feature_id` : "null::bigint as mvt_feature_id";
@@ -554,6 +562,8 @@ export class PostgisRepository implements OnApplicationShutdown {
         from ${qualifiedTable(layer)} t, bounds
         where ${sourceGeom} && ${boundsGeom}
           and ST_Intersects(${sourceGeom}, ${boundsGeom})
+        order by ${this.featureIdSql(layer, false)} asc
+        limit ${this.vectorTileFeatureLimit(z)}
       )
       select ST_AsMVT(mvtgeom.*, $4, 4096, 'geom', 'mvt_feature_id') as mvt
       from mvtgeom
@@ -740,6 +750,24 @@ export class PostgisRepository implements OnApplicationShutdown {
       return "t.ctid";
     }
     return `${quoteIdent(this.readFeatureSortColumn(layer, sort))}::text`;
+  }
+
+  private vectorTilePropertyColumns(layer: LayerRegistration): string[] {
+    return layer.fields
+      .filter((field) => field.name !== layer.primaryKey)
+      .filter((field) => !field.name.toLowerCase().includes("geom"))
+      .slice(0, 4)
+      .map((field) => quoteIdent(field.name));
+  }
+
+  private vectorTileFeatureLimit(z: number): number {
+    if (z <= 8) {
+      return 5000;
+    }
+    if (z <= 12) {
+      return 12000;
+    }
+    return 25000;
   }
 
   private toBadRequest<T>(task: () => T): T {

@@ -174,8 +174,7 @@ type UseOpenLayersEditorOptions = {
   coordinatePrecision?: Ref<number>;
   coordinateAxisOrder?: Ref<CoordinateAxisOrder>;
   readFeature: (layerId: string, pk: string) => Promise<GeoJsonFeature | undefined>;
-  openAttributeTableForFeatureIds?: (layerId: string, featureIds: string[]) => Promise<void>;
-  selectFeatureIdsByGeometry?: (layerId: string, geometry: unknown) => Promise<string[]>;
+  selectFeatureIdsByGeometry?: (layerId: string, geometry: unknown) => Promise<{ ids: string[]; features?: GeoJsonFeature[] }>;
   clearSelection?: () => void;
   setStatus: (text: string, tone?: "neutral" | "success" | "warning" | "danger") => void;
 };
@@ -217,6 +216,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   let viewChangeKey: EventsKey | null = null;
 
   const editSource = new VectorSource();
+  const selectedFeatureSource = new VectorSource();
   const selectionSketchSource = new VectorSource();
   const graticuleLayer = new Graticule({
     showLabels: true,
@@ -239,6 +239,18 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       stroke: new Stroke({ color: "#f97316", width: 3 })
     })
   });
+  const selectedFeatureLayer = new VectorLayer({
+    source: selectedFeatureSource,
+    style: new Style({
+      image: new CircleStyle({
+        radius: 7,
+        fill: new Fill({ color: "#f97316" }),
+        stroke: new Stroke({ color: "#fff7ed", width: 2 })
+      }),
+      fill: new Fill({ color: "rgba(249, 115, 22, 0.18)" }),
+      stroke: new Stroke({ color: "#f97316", width: 3 })
+    })
+  });
   const selectionSketchLayer = new VectorLayer({
     source: selectionSketchSource,
     style: new Style({
@@ -257,7 +269,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     map.value = new OlMap({
       target: options.mapElement.value,
-      layers: [graticuleLayer, selectionSketchLayer, editLayer],
+      layers: [graticuleLayer, selectionSketchLayer, selectedFeatureLayer, editLayer],
       view: new View({
         center: fromLonLat([104.29, 35.5]),
         zoom: 4
@@ -480,15 +492,18 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     const serverLayer = findSelectionQueryLayer();
     if (serverLayer && options.selectFeatureIdsByGeometry) {
       try {
-        const ids = uniqueFeatureIds(await options.selectFeatureIdsByGeometry(
+        const result = await options.selectFeatureIdsByGeometry(
           serverLayer.id,
           writeSelectionGeometryObject(selectionGeometry)
-        ));
+        );
+        const ids = uniqueFeatureIds(result.ids);
         if (ids.length === 0) {
+          selectedFeatureSource.clear();
           options.setStatus("选择范围内没有可查询要素", "warning");
           return;
         }
-        await options.openAttributeTableForFeatureIds?.(serverLayer.id, ids);
+        loadSelectedFeatures(result.features ?? []);
+        options.setStatus(`范围选择完成：高亮 ${ids.length} 个要素`, "success");
         return;
       } catch (error) {
         options.setStatus(
@@ -499,6 +514,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }
     const matches = findFeaturesInSelectionGeometry(selectionGeometry);
     if (matches.length === 0) {
+      selectedFeatureSource.clear();
       options.setStatus("选择范围内没有可查询要素", "warning");
       return;
     }
@@ -518,11 +534,12 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
       ? activeLayerId
       : layerGroups.keys().next().value;
     if (!selectedLayerId) {
-      options.setStatus("选择范围内要素缺少主键，无法打开属性表", "warning");
+      options.setStatus("选择范围内要素缺少主键，无法高亮选择结果", "warning");
       return;
     }
     const ids = uniqueFeatureIds(layerGroups.get(selectedLayerId) ?? []);
-    await options.openAttributeTableForFeatureIds?.(selectedLayerId, ids);
+    loadRenderedSelectionFeatures(matches.filter(({ layer }) => layer.id === selectedLayerId));
+    options.setStatus(`范围选择完成：高亮 ${ids.length} 个已渲染要素`, "success");
   }
 
   function findFeaturesInSelectionGeometry(selectionGeometry: Geometry) {
@@ -644,6 +661,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   }
 
   function loadEditableFeature(feature: GeoJsonFeature) {
+    selectedFeatureSource.clear();
     editSource.clear();
     const parsed = new GeoJSON().readFeature(feature, {
       dataProjection: "EPSG:4326",
@@ -651,6 +669,30 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     }) as Feature<Geometry>;
     editSource.addFeature(parsed);
     updateDraftGeometry();
+  }
+
+  function loadSelectedFeatures(features: GeoJsonFeature[]) {
+    selectedFeatureSource.clear();
+    for (const feature of features) {
+      const parsed = new GeoJSON().readFeature(feature, {
+        dataProjection: "EPSG:4326",
+        featureProjection: "EPSG:3857"
+      }) as Feature<Geometry>;
+      selectedFeatureSource.addFeature(parsed);
+    }
+  }
+
+  function loadRenderedSelectionFeatures(matches: Array<{ feature: FeatureLike; layer: LayerRegistration }>) {
+    selectedFeatureSource.clear();
+    for (const { feature } of matches) {
+      const geometry = feature.getGeometry?.();
+      if (!isCloneableGeometry(geometry)) {
+        continue;
+      }
+      selectedFeatureSource.addFeature(new Feature({
+        geometry: geometry.clone()
+      }));
+    }
   }
 
   function findFeatureLayer(feature?: FeatureLike): LayerRegistration | undefined {
@@ -681,6 +723,7 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   }
 
   function clearDraft() {
+    selectedFeatureSource.clear();
     editSource.clear();
     options.draftGeometry.value = null;
     stopDrawing();
@@ -929,6 +972,10 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
 
 function isVectorTileLayer(layer: BaseLayer | MountedMapLayer | undefined): layer is VectorTileLayer<VectorTileSource> {
   return layer instanceof VectorTileLayer;
+}
+
+function isCloneableGeometry(geometry: unknown): geometry is Geometry {
+  return Boolean(geometry && typeof (geometry as Geometry).clone === "function");
 }
 
 function createDefaultWmtsTileGrid(matrixSet: string) {
