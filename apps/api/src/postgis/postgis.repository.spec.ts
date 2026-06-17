@@ -170,6 +170,7 @@ describe("PostgisRepository ctid-backed layers", () => {
     expect(result.features).toHaveLength(1);
     expect(result.features[0]?.id).toBe("(0,1)");
     expect(queries[0]).toContain("t.ctid::text as id");
+    expect(queries[0]).toContain("select id, feature");
     expect(queries[0]).toContain("ST_AsGeoJSON(ST_Transform");
     expect(queries[0]).toContain("ST_Intersects");
   });

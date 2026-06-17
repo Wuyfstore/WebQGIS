@@ -373,7 +373,7 @@ export class PostgisRepository implements OnApplicationShutdown {
           and ST_Intersects(${this.geometrySql(layer)}, selection.selection_geom)
         order by ${this.featureIdSql(layer)} asc
       )
-      select id
+      select id, feature
       from matches
       limit $2
       `,

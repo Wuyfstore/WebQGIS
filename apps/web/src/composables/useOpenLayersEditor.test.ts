@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
+import RenderFeature from "ol/render/Feature";
 import { fromExtent } from "ol/geom/Polygon";
 import { transformExtent } from "ol/proj";
 import type { FeatureLike } from "ol/Feature";
 import {
+  createHighlightFeatureFromRenderedGeometry,
   estimateScaleDenominator,
   featureIntersectsSelectionGeometry,
   formatCoordinateLabel,
   formatScaleLabel,
+  isHighlightableGeoJsonFeature,
   overlayLayerZIndexes,
   projectLayerExtent,
   projectionStatusLabel,
@@ -92,12 +95,50 @@ describe("readVectorTileFeaturePk", () => {
     expect(firstCoordinate[1]).toBeCloseTo(sourceExtent[1], 5);
   });
 
+  it("accepts only GeoJSON features with non-empty geometry for selection highlights", () => {
+    expect(isHighlightableGeoJsonFeature({
+      type: "Feature",
+      id: "1",
+      geometry: { type: "Polygon", coordinates: [] },
+      properties: {}
+    })).toBe(true);
+    expect(isHighlightableGeoJsonFeature({
+      type: "Feature",
+      id: "2",
+      geometry: null,
+      properties: {}
+    })).toBe(false);
+    expect(isHighlightableGeoJsonFeature(undefined)).toBe(false);
+    expect(isHighlightableGeoJsonFeature({
+      type: "Feature",
+      id: "3",
+      geometry: {},
+      properties: {}
+    })).toBe(false);
+  });
+
   it("samples pixels across a selection box for rendered feature fallback", () => {
     const pixels = buildSelectionSamplePixels([0, 0], [36, 36], { step: 18, maxSamples: 10 });
 
     expect(pixels.length).toBeLessThanOrEqual(10);
     expect(pixels).toContainEqual([18, 18]);
     expect(pixels).toContainEqual([0, 0]);
+  });
+
+  it("converts OpenLayers RenderFeature geometry into ordinary highlight features", () => {
+    const renderFeature = new RenderFeature(
+      "Point",
+      [100, 200],
+      [],
+      2,
+      { id: "rendered-1" },
+      "rendered-1"
+    );
+
+    const highlightFeature = createHighlightFeatureFromRenderedGeometry(renderFeature.getGeometry());
+
+    expect(highlightFeature?.getGeometry()?.getType()).toBe("Point");
+    expect(highlightFeature?.getId()).toBe("rendered-1");
   });
 
   it("keeps selection overlays above map data layers", () => {

@@ -16,7 +16,18 @@ import {
   RefreshLeft,
   Search
 } from "@element-plus/icons-vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, shallowRef, useTemplateRef, watch, type Component } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  shallowRef,
+  useTemplateRef,
+  watch,
+  type Component,
+  type ComponentPublicInstance
+} from "vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
 import AttributeTablePanel from "./AttributeTablePanel.vue";
 import LayerPanel from "./LayerPanel.vue";
@@ -31,7 +42,7 @@ import { getGeometryModes } from "../../utils/layer";
 const workspace = useWebGisWorkspace();
 const mapElement = shallowRef<HTMLDivElement | null>(null);
 const menuRef = useTemplateRef<HTMLElement>("menuRef");
-const selectionToolRef = useTemplateRef<HTMLElement>("selectionToolRef");
+const selectionToolRef = shallowRef<HTMLElement | null>(null);
 const openMenuLabel = shallowRef<string | null>(null);
 const datasourceDialogRequestKey = shallowRef(0);
 const styleEditorLayerId = shallowRef<string | null>(null);
@@ -370,6 +381,10 @@ const crsSourceLabels: Record<CrsDefinition["source"], string> = {
 
 function layerLabel(layer: { schema: string; table: string; displayName?: string }) {
   return layer.displayName ?? `${layer.schema}.${layer.table}`;
+}
+
+function setSelectionToolRef(element: Element | ComponentPublicInstance | null) {
+  selectionToolRef.value = element instanceof HTMLElement ? element : null;
 }
 
 onMounted(async () => {
@@ -859,7 +874,7 @@ function validateActiveLayer() {
         :key="item.label"
         class="workbench__tool-wrap"
         :class="{ 'workbench__tool-wrap--select': item.label === '选择' }"
-        :ref="item.label === '选择' ? 'selectionToolRef' : undefined"
+        :ref="item.label === '选择' ? setSelectionToolRef : undefined"
       >
         <button
           class="workbench__tool focus-ring"

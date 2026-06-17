@@ -19,6 +19,7 @@ import XYZ from "ol/source/XYZ";
 import WMTSTileGrid from "ol/tilegrid/WMTS";
 import { Modify, Snap, Draw } from "ol/interaction";
 import DragBox from "ol/interaction/DragBox";
+import RenderFeature, { toFeature as renderFeatureToFeature } from "ol/render/Feature";
 import { mouseActionButton, noModifierKeys, primaryAction } from "ol/events/condition";
 import { unByKey } from "ol/Observable";
 import { getWidth, intersects } from "ol/extent";
@@ -140,6 +141,18 @@ export function writeSelectionGeometryObject(selectionGeometry: Geometry) {
     dataProjection: "EPSG:4326",
     featureProjection: "EPSG:3857"
   });
+}
+
+export function isHighlightableGeoJsonFeature(feature: unknown): feature is GeoJsonFeature {
+  if (!feature || typeof feature !== "object") {
+    return false;
+  }
+  const candidate = feature as Partial<GeoJsonFeature>;
+  if (candidate.type !== "Feature" || !candidate.geometry || typeof candidate.geometry !== "object") {
+    return false;
+  }
+  const geometry = candidate.geometry as { type?: unknown };
+  return typeof geometry.type === "string" && geometry.type.length > 0;
 }
 
 export function buildSelectionSamplePixels(
@@ -703,11 +716,20 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
   function loadSelectedFeatures(features: GeoJsonFeature[]) {
     selectedFeatureSource.clear();
     for (const feature of features) {
-      const parsed = new GeoJSON().readFeature(feature, {
-        dataProjection: "EPSG:4326",
-        featureProjection: "EPSG:3857"
-      }) as Feature<Geometry>;
-      selectedFeatureSource.addFeature(parsed);
+      if (!isHighlightableGeoJsonFeature(feature)) {
+        continue;
+      }
+      try {
+        const parsed = new GeoJSON().readFeature(feature, {
+          dataProjection: "EPSG:4326",
+          featureProjection: "EPSG:3857"
+        }) as Feature<Geometry>;
+        if (parsed.getGeometry()) {
+          selectedFeatureSource.addFeature(parsed);
+        }
+      } catch {
+        continue;
+      }
     }
     return selectedFeatureSource.getFeatures().length;
   }
@@ -716,12 +738,12 @@ export function useOpenLayersEditor(options: UseOpenLayersEditorOptions) {
     selectedFeatureSource.clear();
     for (const { feature } of matches) {
       const geometry = feature.getGeometry?.();
-      if (!isCloneableGeometry(geometry)) {
-        continue;
+      const clonedFeature = createHighlightFeatureFromRenderedGeometry(geometry);
+      if (clonedFeature) {
+        selectedFeatureSource.addFeature(clonedFeature);
+      } else {
+        console.warn("跳过无法转换为高亮要素的已渲染瓦片 geometry", geometry);
       }
-      selectedFeatureSource.addFeature(new Feature({
-        geometry: geometry.clone()
-      }));
     }
   }
 
@@ -1006,6 +1028,36 @@ function isVectorTileLayer(layer: BaseLayer | MountedMapLayer | undefined): laye
 
 function isCloneableGeometry(geometry: unknown): geometry is Geometry {
   return Boolean(geometry && typeof (geometry as Geometry).clone === "function");
+}
+
+export function createHighlightFeatureFromRenderedGeometry(geometry: unknown): Feature<Geometry> | null {
+  if (geometry instanceof RenderFeature) {
+    try {
+      return renderFeatureToFeature(geometry) as Feature<Geometry>;
+    } catch {
+      return null;
+    }
+  }
+  if (!isCloneableGeometry(geometry)) {
+    return null;
+  }
+  return cloneGeometryAsFeature(geometry);
+}
+
+function cloneGeometryAsFeature(geometry: Geometry): Feature<Geometry> | null {
+  try {
+    const geometryObject = new GeoJSON().writeGeometryObject(geometry, {
+      dataProjection: "EPSG:3857",
+      featureProjection: "EPSG:3857"
+    });
+    const clonedGeometry = new GeoJSON().readGeometry(geometryObject, {
+      dataProjection: "EPSG:3857",
+      featureProjection: "EPSG:3857"
+    });
+    return new Feature({ geometry: clonedGeometry });
+  } catch {
+    return null;
+  }
 }
 
 function createDefaultWmtsTileGrid(matrixSet: string) {
