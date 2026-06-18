@@ -301,7 +301,8 @@ vi.mock("../../api", () => ({
             adcode: 510104
           }
         },
-        tileVersion: 2
+        tileVersion: 2,
+        dirtyTiles: [{ z: 12, x: 3234, y: 1692 }]
       };
     }
     if (path === "/api/layers/city/features/2049" && method === "PUT") {
@@ -327,6 +328,12 @@ vi.mock("../../api", () => ({
       return {
         targetField: (payload as { targetField: string }).targetField,
         affectedRows: 2
+      };
+    }
+    if (path === "/api/layers/city/features/2048" && method === "DELETE") {
+      return {
+        tileVersion: 3,
+        dirtyTiles: [{ z: 12, x: 3234, y: 1692 }]
       };
     }
     if (path === "/api/crs/custom" && method === "POST") {
@@ -974,6 +981,37 @@ describe("WebGisWorkbench", () => {
     expect(editorMock.loadEditableFeature).not.toHaveBeenCalled();
     expect(editorMock.markFeatureCovered).not.toHaveBeenCalled();
     expect(editorMock.refreshLayer).not.toHaveBeenCalledWith("city");
+  });
+
+  it("refreshes the layer after delete responses include dirtyTiles", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    editorOptions!.selectedFeatureId.value = "2048";
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    await flushPromises();
+    editorMock.requestDeleteConfirmation.mockResolvedValueOnce(true);
+    editorMock.clearDraft.mockClear();
+    editorMock.refreshLayer.mockClear();
+
+    await wrapper.findAll(".workbench__menu-item")
+      .find((button) => button.text() === "编辑")
+      ?.trigger("click");
+    await flushPromises();
+    const deleteCommand = wrapper.findAll(".workbench__menu-command")
+      .find((button) => button.text() === "删除选中要素");
+    expect(deleteCommand?.exists()).toBe(true);
+    await deleteCommand?.trigger("click");
+    await flushPromises();
+
+    expect(editorMock.clearDraft).toHaveBeenCalled();
+    expect(editorMock.refreshLayer).toHaveBeenCalledWith("city");
+    expect(editorOptions!.layers.value.find((layer) => layer.id === "city")?.tileVersion).toBe(3);
   });
 
   it("keeps compatibility with legacy feature-only save responses", async () => {

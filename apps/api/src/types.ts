@@ -75,6 +75,14 @@ export type GeoJsonFeature = {
   properties?: Record<string, unknown> | null;
 };
 
+export type GeometryBbox = [number, number, number, number];
+
+export type DirtyTile = {
+  z: number;
+  x: number;
+  y: number;
+};
+
 export type FeaturePayload = {
   geometry?: unknown;
   properties?: Record<string, unknown>;
@@ -83,6 +91,22 @@ export type FeaturePayload = {
 export type FeatureWriteResult = {
   feature: GeoJsonFeature;
   tileVersion: number;
+  dirtyTiles: DirtyTile[];
+};
+
+export type FeatureDeleteResult = {
+  tileVersion: number;
+  dirtyTiles: DirtyTile[];
+};
+
+export type FeatureMutationResult = {
+  feature: GeoJsonFeature;
+  oldBbox: GeometryBbox | null;
+  newBbox: GeometryBbox | null;
+};
+
+export type FeatureDeleteMutationResult = {
+  oldBbox: GeometryBbox | null;
 };
 
 export type FeatureSelectionPayload = {

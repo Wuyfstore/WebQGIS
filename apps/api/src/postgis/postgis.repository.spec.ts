@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DatasourceConfig, LayerRegistration } from "../types.js";
-import { PostgisRepository } from "./postgis.repository.js";
+import { geometryBbox, PostgisRepository } from "./postgis.repository.js";
 
 function createDatasource(): DatasourceConfig {
   return {
@@ -61,6 +61,14 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
 }
 
 describe("PostgisRepository ctid-backed layers", () => {
+  it("calculates bboxes for nested GeoJSON geometries", () => {
+    expect(geometryBbox({
+      type: "Polygon",
+      coordinates: [[[104, 30], [105, 31], [103, 32], [104, 30]]]
+    })).toEqual([103, 30, 105, 32]);
+    expect(geometryBbox(null)).toBeNull();
+  });
+
   it("lists rows without requiring a primary key or an exact full-table count", async () => {
     const queries: string[] = [];
     const repository = new PostgisRepository();

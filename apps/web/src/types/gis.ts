@@ -7,6 +7,12 @@ export type GeoJsonFeature = {
   properties?: Record<string, unknown> | null;
 };
 
+export type DirtyTile = {
+  z: number;
+  x: number;
+  y: number;
+};
+
 export type FeatureSummary = {
   type: "Feature";
   id: string | number | null;
@@ -164,6 +170,12 @@ export type LayerStylePatch = Partial<LayerStyle>;
 export type FeatureWriteResult = {
   feature: GeoJsonFeature;
   tileVersion: number;
+  dirtyTiles: DirtyTile[];
+};
+
+export type FeatureDeleteResult = {
+  tileVersion: number;
+  dirtyTiles: DirtyTile[];
 };
 
 export type CrsDefinition = {

@@ -604,7 +604,7 @@ async function handleSaveFeature() {
   if (saved) {
     editor.loadEditableFeature(saved);
     editor.markFeatureCovered(layerId, saved.id ?? featureId);
-    editor.refreshLayer(layerId);
+    refreshLayerAfterMutation(layerId, workspace.consumeLastDirtyTiles());
   }
 }
 
@@ -620,8 +620,19 @@ async function handleDeleteFeature() {
   const deleted = await workspace.deleteSelectedFeature();
   if (deleted) {
     editor.clearDraft();
-    editor.refreshLayer(activeLayer.value?.id);
+    refreshLayerAfterMutation(activeLayer.value?.id, workspace.consumeLastDirtyTiles());
   }
+}
+
+function refreshLayerAfterMutation(layerId: string | undefined, dirtyTiles: Array<{ z: number; x: number; y: number }>) {
+  if (!layerId) {
+    return;
+  }
+  if (dirtyTiles.length > 0) {
+    editor.refreshLayer(layerId);
+    return;
+  }
+  editor.refreshLayer(layerId);
 }
 
 function handleClearDraft() {

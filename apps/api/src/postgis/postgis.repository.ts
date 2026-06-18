@@ -1,15 +1,18 @@
-import { BadRequestException, Injectable, OnApplicationShutdown } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, OnApplicationShutdown } from "@nestjs/common";
 import { Pool } from "pg";
 import type {
   DatasourceConfig,
   FeaturePage,
   FeaturePageQuery,
   FeaturePayload,
+  FeatureDeleteMutationResult,
+  FeatureMutationResult,
   FeatureSelectionPayload,
   FeatureSelectionResult,
   FeatureSummary,
   FieldMeta,
   GeoJsonFeature,
+  GeometryBbox,
   GeometryKind,
   LayerRegistration,
   SqlQueryResult,
@@ -392,7 +395,7 @@ export class PostgisRepository implements OnApplicationShutdown {
     config: DatasourceConfig,
     layer: LayerRegistration,
     payload: FeaturePayload
-  ) {
+  ): Promise<FeatureMutationResult> {
     this.assertEditableLayer(layer);
     if (!payload.geometry) {
       throw new BadRequestException("Feature geometry is required");
@@ -419,7 +422,15 @@ export class PostgisRepository implements OnApplicationShutdown {
       `,
       queryValues
     );
-    return this.readFeature(config, layer, String(result.rows[0].id));
+    const feature = await this.readFeature(config, layer, String(result.rows[0].id));
+    if (!feature) {
+      throw new NotFoundException("Feature not found");
+    }
+    return {
+      feature,
+      oldBbox: null,
+      newBbox: geometryBbox(feature.geometry)
+    };
   }
 
   async queryLayer(
@@ -480,8 +491,9 @@ export class PostgisRepository implements OnApplicationShutdown {
     layer: LayerRegistration,
     pk: string,
     payload: FeaturePayload
-  ) {
+  ): Promise<FeatureMutationResult> {
     this.assertEditableLayer(layer);
+    const oldFeature = await this.readFeature(config, layer, pk);
     const properties = filterProperties(layer, payload.properties);
     const setParts: string[] = [];
     const values: unknown[] = [];
@@ -498,7 +510,14 @@ export class PostgisRepository implements OnApplicationShutdown {
       values.push(JSON.stringify(payload.geometry));
     }
     if (setParts.length === 0) {
-      return this.readFeature(config, layer, pk);
+      if (!oldFeature) {
+        throw new NotFoundException("Feature not found");
+      }
+      return {
+        feature: oldFeature,
+        oldBbox: geometryBbox(oldFeature.geometry),
+        newBbox: geometryBbox(oldFeature.geometry)
+      };
     }
     values.push(pk);
     const idPredicate = this.buildFeatureIdPredicate(layer, values.length);
@@ -513,20 +532,32 @@ export class PostgisRepository implements OnApplicationShutdown {
       values
     );
     const nextId = result.rows[0]?.id ?? pk;
-    return this.readFeature(config, layer, String(nextId));
+    const feature = await this.readFeature(config, layer, String(nextId));
+    if (!feature) {
+      throw new NotFoundException("Feature not found");
+    }
+    return {
+      feature,
+      oldBbox: geometryBbox(oldFeature?.geometry),
+      newBbox: geometryBbox(feature.geometry)
+    };
   }
 
   async deleteFeature(
     config: DatasourceConfig,
     layer: LayerRegistration,
     pk: string
-  ): Promise<void> {
+  ): Promise<FeatureDeleteMutationResult> {
     this.assertEditableLayer(layer);
+    const oldFeature = await this.readFeature(config, layer, pk);
     const pool = this.getPool(config);
     await pool.query(
       `delete from ${qualifiedTable(layer)} t where ${this.buildFeatureIdPredicate(layer, 1)}`,
       [pk]
     );
+    return {
+      oldBbox: geometryBbox(oldFeature?.geometry)
+    };
   }
 
   async getVectorTile(
@@ -864,4 +895,46 @@ export class PostgisRepository implements OnApplicationShutdown {
     );
     return Number(estimateResult.rows[0]?.total ?? 0);
   }
+}
+
+export function geometryBbox(geometry: unknown): GeometryBbox | null {
+  const bbox: GeometryBbox = [Infinity, Infinity, -Infinity, -Infinity];
+  collectGeometryCoordinates(geometry, bbox);
+  if (bbox.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+  return bbox;
+}
+
+function collectGeometryCoordinates(value: unknown, bbox: GeometryBbox) {
+  if (!Array.isArray(value)) {
+    if (isGeoJsonGeometry(value)) {
+      collectGeometryCoordinates(value.coordinates, bbox);
+    }
+    return;
+  }
+  if (isCoordinate(value)) {
+    const lon = Number(value[0]);
+    const lat = Number(value[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      bbox[0] = Math.min(bbox[0], lon);
+      bbox[1] = Math.min(bbox[1], lat);
+      bbox[2] = Math.max(bbox[2], lon);
+      bbox[3] = Math.max(bbox[3], lat);
+    }
+    return;
+  }
+  for (const item of value) {
+    collectGeometryCoordinates(item, bbox);
+  }
+}
+
+function isCoordinate(value: unknown[]): value is [unknown, unknown, ...unknown[]] {
+  return value.length >= 2
+    && typeof value[0] === "number"
+    && typeof value[1] === "number";
+}
+
+function isGeoJsonGeometry(value: unknown): value is { coordinates: unknown } {
+  return Boolean(value && typeof value === "object" && "coordinates" in value);
 }

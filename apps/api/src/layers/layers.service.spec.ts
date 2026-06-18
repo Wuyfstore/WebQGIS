@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DatasourceConfig, GeoJsonFeature, LayerRegistration } from "../types.js";
+import type { DatasourceConfig, LayerRegistration } from "../types.js";
 import { LayersService } from "./layers.service.js";
 
 function createDatasource(): DatasourceConfig {
@@ -54,7 +54,6 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
 function createService(options: {
   layer?: LayerRegistration;
   tile?: Buffer;
-  feature?: GeoJsonFeature;
   bumpedVersion?: number;
 }) {
   const layer = options.layer ?? createLayer();
@@ -70,12 +69,16 @@ function createService(options: {
   };
   const postgisRepository = {
     getVectorTile: vi.fn(async () => options.tile ?? Buffer.from("tile")),
-    createFeature: vi.fn(async () => options.feature ?? {
-      type: "Feature" as const,
-      id: 7,
-      geometry: { type: "Point", coordinates: [104, 30] },
-      properties: { name: "road-7" }
-    }),
+    createFeature: vi.fn(async () => ({
+      feature: {
+        type: "Feature" as const,
+        id: 7,
+        geometry: { type: "Point", coordinates: [104, 30] },
+        properties: { name: "road-7" }
+      },
+      oldBbox: null,
+      newBbox: [104, 30, 104, 30] as [number, number, number, number]
+    })),
     updateFeature: vi.fn(),
     deleteFeature: vi.fn()
   };
@@ -111,6 +114,7 @@ describe("LayersService tile version cache", () => {
 
     expect(result.tileVersion).toBe(2);
     expect(result.feature.id).toBe(7);
+    expect(result.dirtyTiles.length).toBeGreaterThan(0);
     expect(layersRepository.bumpTileVersion).toHaveBeenCalledWith("layer-1");
     expect(postgisRepository.getVectorTile).toHaveBeenCalledTimes(2);
   });
@@ -123,23 +127,33 @@ describe("LayersService tile version cache", () => {
       geometry: { type: "Point", coordinates: [105, 31] },
       properties: { name: "updated-road" }
     };
-    postgisRepository.updateFeature.mockResolvedValueOnce(feature);
+    postgisRepository.updateFeature.mockResolvedValueOnce({
+      feature,
+      oldBbox: [104, 30, 104, 30],
+      newBbox: [105, 31, 105, 31]
+    });
 
     const result = await service.updateFeature("layer-1", "7", {
       geometry: feature.geometry,
       properties: feature.properties
     });
 
-    expect(result).toEqual({ feature, tileVersion: 5 });
+    expect(result.feature).toEqual(feature);
+    expect(result.tileVersion).toBe(5);
+    expect(result.dirtyTiles.length).toBeGreaterThan(0);
     expect(layersRepository.bumpTileVersion).toHaveBeenCalledWith("layer-1");
   });
 
   it("bumps tileVersion after deleting a feature", async () => {
     const { service, layersRepository, postgisRepository } = createService({ bumpedVersion: 6 });
+    postgisRepository.deleteFeature.mockResolvedValueOnce({
+      oldBbox: [104, 30, 104, 30]
+    });
 
     const result = await service.deleteFeature("layer-1", "7");
 
-    expect(result).toEqual({ tileVersion: 6 });
+    expect(result.tileVersion).toBe(6);
+    expect(result.dirtyTiles.length).toBeGreaterThan(0);
     expect(postgisRepository.deleteFeature).toHaveBeenCalled();
     expect(layersRepository.bumpTileVersion).toHaveBeenCalledWith("layer-1");
   });

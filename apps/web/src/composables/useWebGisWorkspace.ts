@@ -5,11 +5,13 @@ import { getEditableFields, getLayerStatus, isPostgisLayer } from "../utils/laye
 import type {
   Datasource,
   DatasourceForm,
+  DirtyTile,
   AttributeTableQuery,
   AttributeCalculationPayload,
   AttributeCalculationResult,
   CrsDefinition,
   CustomCrsPayload,
+  FeatureDeleteResult,
   FeaturePage,
   FeatureSelectionResult,
   FeatureSummary,
@@ -64,6 +66,7 @@ export function useWebGisWorkspace() {
   const selectedProperties = shallowRef<Record<string, unknown>>({});
   const draftGeometry = shallowRef<unknown>(null);
   const isDraftDirty = shallowRef(false);
+  const lastDirtyTiles = shallowRef<DirtyTile[]>([]);
   const displayProjection = shallowRef("EPSG:3857");
   const crsCatalog = shallowRef<CrsDefinition[]>([]);
   const customCrsCatalog = shallowRef<CrsDefinition[]>([]);
@@ -146,6 +149,12 @@ export function useWebGisWorkspace() {
 
   function markDraftClean() {
     isDraftDirty.value = false;
+  }
+
+  function consumeLastDirtyTiles() {
+    const current = lastDirtyTiles.value;
+    lastDirtyTiles.value = [];
+    return current;
   }
 
   function applyLayerTileVersion(layerId: string, tileVersion: number) {
@@ -529,6 +538,7 @@ export function useWebGisWorkspace() {
       if ("tileVersion" in result) {
         applyLayerTileVersion(layer.id, result.tileVersion);
       }
+      lastDirtyTiles.value = readDirtyTiles(result);
       setSelectedFeature(saved);
       draftGeometry.value = saved.geometry;
       markDraftClean();
@@ -544,10 +554,11 @@ export function useWebGisWorkspace() {
       return false;
     }
     const deleted = await withBusy(async () => {
-      const result = await apiSend<void | { tileVersion: number }>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "DELETE");
+      const result = await apiSend<void | FeatureDeleteResult>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "DELETE");
       if (result && typeof result === "object" && "tileVersion" in result) {
         applyLayerTileVersion(layer.id, result.tileVersion);
       }
+      lastDirtyTiles.value = result && typeof result === "object" ? readDirtyTiles(result) : [];
       clearDraftState();
       setStatus("删除成功", "success");
       return true;
@@ -600,6 +611,7 @@ export function useWebGisWorkspace() {
     selectedProperties,
     draftGeometry,
     isDraftDirty,
+    lastDirtyTiles,
     hasUnsavedEditDraft,
     datasourceForm,
     editableFields,
@@ -638,12 +650,21 @@ export function useWebGisWorkspace() {
     markDraftDirty,
     markDraftClean,
     applyLayerTileVersion,
+    consumeLastDirtyTiles,
     setStatus
   };
 }
 
 function normalizeFeatureWriteResult(result: GeoJsonFeature | FeatureWriteResult): GeoJsonFeature {
   return "feature" in result ? result.feature : result;
+}
+
+function readDirtyTiles(result: unknown) {
+  if (!result || typeof result !== "object" || !("dirtyTiles" in result)) {
+    return [];
+  }
+  const dirtyTiles = (result as { dirtyTiles?: unknown }).dirtyTiles;
+  return Array.isArray(dirtyTiles) ? dirtyTiles as DirtyTile[] : [];
 }
 
 function createWebLayer(connection: WebServiceConnection): LayerRegistration {

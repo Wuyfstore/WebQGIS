@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatasourcesRepository } from "../datasources/datasources.repository.js";
 import { PostgisRepository } from "../postgis/postgis.repository.js";
-import type { FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, FeatureWriteResult, LayerRegistration, LayerStyle } from "../types.js";
+import type { FeatureDeleteResult, FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, FeatureWriteResult, GeometryBbox, LayerRegistration, LayerStyle } from "../types.js";
+import { dirtyTilesForBbox, mergeBboxes } from "../tiles/dirty-tiles.js";
 import { AttributeCalculationDto } from "./dto/attribute-calculation.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
 import { SqlQueryDto } from "./dto/sql-query.dto.js";
@@ -61,25 +62,36 @@ export class LayersService {
   async createFeature(layerId: string, payload: FeaturePayload): Promise<FeatureWriteResult> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
-    const feature = await this.postgisRepository.createFeature(datasource, layer, payload);
+    const mutation = await this.postgisRepository.createFeature(datasource, layer, payload);
     const tileVersion = await this.bumpLayerTileVersion(layerId);
-    return { feature, tileVersion };
+    return {
+      feature: mutation.feature,
+      tileVersion,
+      dirtyTiles: this.dirtyTilesForMutation(mutation.oldBbox, mutation.newBbox)
+    };
   }
 
   async updateFeature(layerId: string, pk: string, payload: FeaturePayload): Promise<FeatureWriteResult> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
-    const feature = await this.postgisRepository.updateFeature(datasource, layer, pk, payload);
+    const mutation = await this.postgisRepository.updateFeature(datasource, layer, pk, payload);
     const tileVersion = await this.bumpLayerTileVersion(layerId);
-    return { feature, tileVersion };
+    return {
+      feature: mutation.feature,
+      tileVersion,
+      dirtyTiles: this.dirtyTilesForMutation(mutation.oldBbox, mutation.newBbox)
+    };
   }
 
-  async deleteFeature(layerId: string, pk: string): Promise<{ tileVersion: number }> {
+  async deleteFeature(layerId: string, pk: string): Promise<FeatureDeleteResult> {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
-    await this.postgisRepository.deleteFeature(datasource, layer, pk);
+    const mutation = await this.postgisRepository.deleteFeature(datasource, layer, pk);
     const tileVersion = await this.bumpLayerTileVersion(layerId);
-    return { tileVersion };
+    return {
+      tileVersion,
+      dirtyTiles: this.dirtyTilesForMutation(mutation.oldBbox, null)
+    };
   }
 
   async updateStyle(layerId: string, dto: LayerStyleDto): Promise<LayerRegistration> {
@@ -145,5 +157,9 @@ export class LayersService {
 
   private tileCacheKey(layerId: string, z: number, x: number, y: number, tileVersion: number) {
     return `${layerId}:${z}:${x}:${y}:${tileVersion}`;
+  }
+
+  private dirtyTilesForMutation(oldBbox: GeometryBbox | null, newBbox: GeometryBbox | null) {
+    return dirtyTilesForBbox(mergeBboxes(oldBbox, newBbox));
   }
 }
