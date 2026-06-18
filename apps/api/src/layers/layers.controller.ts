@@ -10,6 +10,11 @@ import { SqlQueryDto } from "./dto/sql-query.dto.js";
 import { TileParamDto } from "./dto/tile-param.dto.js";
 import { LayersService } from "./layers.service.js";
 
+type HeaderResponse = {
+  header?: (name: string, value: string) => void;
+  setHeader?: (name: string, value: string) => void;
+};
+
 @Controller("layers")
 export class LayersController {
   constructor(
@@ -73,9 +78,9 @@ export class LayersController {
   async getVectorTile(
     @Param() params: TileParamDto,
     @Query("v") version: string | undefined,
-    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): void }
+    @Res({ passthrough: true }) response: HeaderResponse
   ) {
-    response.setHeader("etag", `"${params.id}-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
+    setResponseHeader(response, "etag", `"${params.id}-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
     return this.layersService.getVectorTile(params.id, params.z, params.x, params.y);
   }
 
@@ -85,9 +90,17 @@ export class LayersController {
   async getOfflineVectorTile(
     @Param() params: TileParamDto,
     @Query("v") version: string | undefined,
-    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): void }
+    @Res({ passthrough: true }) response: HeaderResponse
   ) {
-    response.setHeader("etag", `"${params.id}-offline-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
+    setResponseHeader(response, "etag", `"${params.id}-offline-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
     return this.layersService.getVectorTile(params.id, params.z, params.x, params.y);
   }
+}
+
+function setResponseHeader(response: HeaderResponse, name: string, value: string) {
+  if (response.header) {
+    response.header(name, value);
+    return;
+  }
+  response.setHeader?.(name, value);
 }
