@@ -43,6 +43,15 @@ export type LayerStyle = {
   opacity: number;
 };
 
+export type LayerScaleSource = {
+  minZoom: number;
+  maxZoom: number;
+  schema: string;
+  table: string;
+  geometryColumn: string;
+  idColumn?: string | null;
+};
+
 export type LayerRegistration = {
   id: string;
   datasourceId: string;
@@ -63,6 +72,7 @@ export type LayerRegistration = {
   editableReason: string[];
   tileUrl: string;
   tileVersion: number;
+  scaleSources?: LayerScaleSource[];
   style: LayerStyle;
   extent: [number, number, number, number] | null;
   updatedAt: string;

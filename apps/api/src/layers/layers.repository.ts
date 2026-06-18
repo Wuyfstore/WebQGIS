@@ -33,7 +33,8 @@ export class LayersRepository {
         ? {
             ...layer,
             style: previous.style,
-            tileVersion: previous.tileVersion ?? 1
+            tileVersion: previous.tileVersion ?? 1,
+            scaleSources: previous.scaleSources
           }
         : layer;
     });

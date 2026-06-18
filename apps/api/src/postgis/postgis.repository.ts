@@ -15,6 +15,7 @@ import type {
   GeometryBbox,
   GeometryKind,
   LayerRegistration,
+  LayerScaleSource,
   SqlQueryResult,
   AttributeCalculationResult
 } from "../types.js";
@@ -568,13 +569,14 @@ export class PostgisRepository implements OnApplicationShutdown {
     y: number
   ): Promise<Buffer> {
     const pool = this.getPool(config);
-    const sourceGeom = this.geometrySql(layer);
-    const boundsGeom = this.tileBoundsSql(layer);
-    const propertyColumns = this.vectorTilePropertyColumns(layer);
-    const primaryField = layer.fields.find((field) => field.name === layer.primaryKey);
+    const tileLayer = this.vectorTileLayerForZoom(layer, z);
+    const sourceGeom = this.geometrySql(tileLayer);
+    const boundsGeom = this.tileBoundsSql(tileLayer);
+    const propertyColumns = this.vectorTilePropertyColumns(tileLayer);
+    const primaryField = tileLayer.fields.find((field) => field.name === tileLayer.primaryKey);
     const canUseMvtFeatureId = Boolean(primaryField && this.isIntegerField(primaryField));
-    const featureIdColumn = canUseMvtFeatureId ? `${quoteIdent(layer.primaryKey!)}::bigint as mvt_feature_id` : "null::bigint as mvt_feature_id";
-    const idPropertyColumn = `${this.featureIdSql(layer)} as id`;
+    const featureIdColumn = canUseMvtFeatureId ? `${quoteIdent(tileLayer.primaryKey!)}::bigint as mvt_feature_id` : "null::bigint as mvt_feature_id";
+    const idPropertyColumn = `${this.featureIdSql(tileLayer)} as id`;
     const selectColumns = [featureIdColumn, idPropertyColumn, ...propertyColumns].join(", ");
     const result = await pool.query<{ mvt: Buffer }>(
       `
@@ -591,10 +593,10 @@ export class PostgisRepository implements OnApplicationShutdown {
             64,
             true
           ) as geom
-        from ${qualifiedTable(layer)} t, bounds
+        from ${qualifiedTable(tileLayer)} t, bounds
         where ${sourceGeom} && ${boundsGeom}
           and ST_Intersects(${sourceGeom}, ${boundsGeom})
-        order by ${this.featureIdSql(layer, false)} asc
+        order by ${this.featureIdSql(tileLayer, false)} asc
         limit ${this.vectorTileFeatureLimit(z)}
       )
       select ST_AsMVT(mvtgeom.*, $4, 4096, 'geom', 'mvt_feature_id') as mvt
@@ -800,6 +802,29 @@ export class PostgisRepository implements OnApplicationShutdown {
       return 12000;
     }
     return 25000;
+  }
+
+  private vectorTileLayerForZoom(layer: LayerRegistration, z: number): LayerRegistration {
+    const scaleSource = this.findScaleSource(layer.scaleSources, z);
+    if (!scaleSource) {
+      return layer;
+    }
+    return {
+      ...layer,
+      schema: scaleSource.schema,
+      table: scaleSource.table,
+      geometryColumn: scaleSource.geometryColumn,
+      primaryKey: scaleSource.idColumn ?? layer.primaryKey,
+      fields: scaleSource.idColumn
+        ? layer.fields.filter((field) => field.name === scaleSource.idColumn)
+        : []
+    };
+  }
+
+  private findScaleSource(scaleSources: LayerScaleSource[] | undefined, z: number): LayerScaleSource | undefined {
+    return scaleSources
+      ?.filter((source) => z >= source.minZoom && z <= source.maxZoom)
+      .sort((a, b) => (a.maxZoom - a.minZoom) - (b.maxZoom - b.minZoom))[0];
   }
 
   private toBadRequest<T>(task: () => T): T {

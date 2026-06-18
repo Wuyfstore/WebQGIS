@@ -62,6 +62,15 @@ export type AttributeTableQuery = {
 
 export type LayerSourceType = "postgis" | "xyz" | "wms" | "wmts";
 
+export type LayerScaleSource = {
+  minZoom: number;
+  maxZoom: number;
+  schema: string;
+  table: string;
+  geometryColumn: string;
+  idColumn?: string | null;
+};
+
 export type WebLayerSource =
   | {
       type: "xyz";
@@ -152,6 +161,7 @@ export type LayerRegistration = {
   editableReason: string[];
   tileUrl: string;
   tileVersion: number;
+  scaleSources?: LayerScaleSource[];
   style: {
     fill: string;
     stroke: string;

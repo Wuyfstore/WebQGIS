@@ -213,4 +213,100 @@ describe("PostgisRepository ctid-backed layers", () => {
     expect(queries[0]).toContain('"status"');
     expect(queries[0]).not.toContain('"extra"');
   });
+
+  it("routes vector tiles to scale source tables by zoom", async () => {
+    const queries: string[] = [];
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [{ mvt: Buffer.from("tile") }] };
+      }
+    });
+    const layer = createLayer({
+      primaryKey: "id",
+      fields: [
+        { name: "id", dataType: "integer", udtName: "int4", nullable: false, defaultValue: null, editable: false },
+        { name: "name", dataType: "text", udtName: "text", nullable: true, defaultValue: null, editable: true }
+      ],
+      scaleSources: [
+        {
+          minZoom: 0,
+          maxZoom: 6,
+          schema: "public",
+          table: "roads_simplified_z0_6",
+          geometryColumn: "geom_simplified",
+          idColumn: "id"
+        }
+      ]
+    });
+
+    await repository.getVectorTile(createDatasource(), layer, 5, 20, 10);
+    await repository.getVectorTile(createDatasource(), layer, 12, 1200, 600);
+
+    expect(queries[0]).toContain('"public"."roads_simplified_z0_6"');
+    expect(queries[0]).toContain('t."geom_simplified"');
+    expect(queries[1]).toContain('"public"."roads"');
+    expect(queries[1]).toContain('t."geom"');
+  });
+
+  it("prefers the narrowest matching scale source range for vector tiles", async () => {
+    const queries: string[] = [];
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [{ mvt: Buffer.from("tile") }] };
+      }
+    });
+
+    await repository.getVectorTile(createDatasource(), createLayer({
+      primaryKey: "id",
+      fields: [
+        { name: "id", dataType: "integer", udtName: "int4", nullable: false, defaultValue: null, editable: false }
+      ],
+      scaleSources: [
+        { minZoom: 0, maxZoom: 10, schema: "public", table: "roads_simplified_z0_10", geometryColumn: "geom", idColumn: "id" },
+        { minZoom: 5, maxZoom: 6, schema: "public", table: "roads_simplified_z5_6", geometryColumn: "geom", idColumn: "id" }
+      ]
+    }), 5, 20, 10);
+
+    expect(queries[0]).toContain('"public"."roads_simplified_z5_6"');
+    expect(queries[0]).not.toContain("roads_simplified_z0_10");
+  });
+
+  it("keeps edit reads on the original table even when scale sources exist", async () => {
+    const queries: string[] = [];
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return {
+          rows: [{
+            feature: {
+              type: "Feature",
+              id: "7",
+              geometry: { type: "Point", coordinates: [104, 30] },
+              properties: { name: "road-7" }
+            }
+          }]
+        };
+      }
+    });
+
+    await repository.readFeature(createDatasource(), createLayer({
+      primaryKey: "id",
+      scaleSources: [{
+        minZoom: 0,
+        maxZoom: 6,
+        schema: "public",
+        table: "roads_simplified_z0_6",
+        geometryColumn: "geom_simplified",
+        idColumn: "id"
+      }]
+    }), "7");
+
+    expect(queries[0]).toContain('"public"."roads"');
+    expect(queries[0]).not.toContain("roads_simplified_z0_6");
+  });
 });

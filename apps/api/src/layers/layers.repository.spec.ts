@@ -96,6 +96,21 @@ describe("LayersRepository", () => {
     expect(next.find((layer) => layer.id === "layer-1")?.tileVersion).toBe(9);
   });
 
+  it("preserves configured scale sources when replacing scanned layers for a datasource", async () => {
+    const scaleSources = [{
+      minZoom: 0,
+      maxZoom: 6,
+      schema: "public",
+      table: "roads_simplified_z0_6",
+      geometryColumn: "geom"
+    }];
+    await store.write("layers.json", [createLayer({ scaleSources })]);
+
+    const next = await repository.replaceForDatasource("source-1", [createLayer()]);
+
+    expect(next.find((layer) => layer.id === "layer-1")?.scaleSources).toEqual(scaleSources);
+  });
+
   it("updates layer style and timestamp", async () => {
     await store.write("layers.json", [createLayer()]);
 
