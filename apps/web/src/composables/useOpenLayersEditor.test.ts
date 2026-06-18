@@ -16,6 +16,7 @@ import {
   projectionStatusLabel,
   readVectorTileFeaturePk,
   selectionModeStatus,
+  tileUrlForLayer,
   uniqueFeatureIds,
   versionedTileUrl,
   writeSelectionGeometryObject,
@@ -64,13 +65,33 @@ describe("readVectorTileFeaturePk", () => {
 
   it("appends tileVersion to vector tile urls", () => {
     expect(versionedTileUrl({
+      id: "city",
       tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt",
       tileVersion: 3
     })).toBe("/api/layers/city/tile/{z}/{x}/{y}.mvt?v=3");
     expect(versionedTileUrl({
+      id: "city",
       tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt?debug=1",
       tileVersion: 4
     })).toBe("/api/layers/city/tile/{z}/{x}/{y}.mvt?debug=1&v=4");
+  });
+
+  it("uses the offline tile endpoint for directory tile packages", () => {
+    expect(tileUrlForLayer({
+      id: "city layer",
+      tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt",
+      tileVersion: 5,
+      tileSourceType: "directory"
+    })).toBe("/api/layers/city%20layer/offline-tile/{z}/{x}/{y}.mvt?v=5");
+  });
+
+  it("keeps cached tile sources on the live endpoint while relying on tileVersion cache busting", () => {
+    expect(tileUrlForLayer({
+      id: "city",
+      tileUrl: "/api/layers/city/tile/{z}/{x}/{y}.mvt",
+      tileVersion: 6,
+      tileSourceType: "cached"
+    })).toBe("/api/layers/city/tile/{z}/{x}/{y}.mvt?v=6");
   });
 
   it("formats live map status labels", () => {

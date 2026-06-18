@@ -78,4 +78,16 @@ export class LayersController {
     response.setHeader("etag", `"${params.id}-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
     return this.layersService.getVectorTile(params.id, params.z, params.x, params.y);
   }
+
+  @Get(":id/offline-tile/:z/:x/:y.mvt")
+  @Header("content-type", "application/vnd.mapbox-vector-tile")
+  @Header("cache-control", "public, max-age=31536000, immutable")
+  async getOfflineVectorTile(
+    @Param() params: TileParamDto,
+    @Query("v") version: string | undefined,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): void }
+  ) {
+    response.setHeader("etag", `"${params.id}-offline-${params.z}-${params.x}-${params.y}-${version ?? "current"}"`);
+    return this.layersService.getVectorTile(params.id, params.z, params.x, params.y);
+  }
 }

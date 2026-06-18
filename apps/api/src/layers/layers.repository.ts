@@ -34,6 +34,8 @@ export class LayersRepository {
             ...layer,
             style: previous.style,
             tileVersion: previous.tileVersion ?? 1,
+            tileSourceType: previous.tileSourceType,
+            tilePackages: previous.tilePackages,
             scaleSources: previous.scaleSources
           }
         : layer;
@@ -91,7 +93,8 @@ export class LayersRepository {
   private withDefaults(layer: LayerRegistration): LayerRegistration {
     return {
       ...layer,
-      tileVersion: layer.tileVersion ?? 1
+      tileVersion: layer.tileVersion ?? 1,
+      tileSourceType: layer.tileSourceType ?? "live"
     };
   }
 }

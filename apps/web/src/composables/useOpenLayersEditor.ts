@@ -86,9 +86,17 @@ export function projectLayerExtent(extent: LayerRegistration["extent"]) {
   return transformExtent(extent, "EPSG:4326", "EPSG:3857");
 }
 
-export function versionedTileUrl(layer: Pick<LayerRegistration, "tileUrl" | "tileVersion">) {
-  const separator = layer.tileUrl.includes("?") ? "&" : "?";
-  return `${layer.tileUrl}${separator}v=${encodeURIComponent(String(layer.tileVersion ?? 1))}`;
+export function tileUrlForLayer(layer: Pick<LayerRegistration, "id" | "tileUrl" | "tileVersion" | "tileSourceType">) {
+  const sourceType = layer.tileSourceType ?? "live";
+  const baseUrl = sourceType === "directory" || sourceType === "pmtiles" || sourceType === "mbtiles"
+    ? `/api/layers/${encodeURIComponent(layer.id)}/offline-tile/{z}/{x}/{y}.mvt`
+    : layer.tileUrl;
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}v=${encodeURIComponent(String(layer.tileVersion ?? 1))}`;
+}
+
+export function versionedTileUrl(layer: Pick<LayerRegistration, "id" | "tileUrl" | "tileVersion" | "tileSourceType">) {
+  return tileUrlForLayer(layer);
 }
 
 export function estimateScaleDenominator(resolution?: number | null, center: [number, number] = [0, 0]) {

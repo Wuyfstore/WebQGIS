@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DatasourceConfig, LayerRegistration } from "../types.js";
+import type { DatasourceConfig, LayerRegistration, TilePackage } from "../types.js";
 import { LayersService } from "./layers.service.js";
 
 function createDatasource(): DatasourceConfig {
@@ -38,6 +38,7 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
     editableReason: [],
     tileUrl: "/api/layers/layer-1/tile/{z}/{x}/{y}.mvt",
     tileVersion: 1,
+    tileSourceType: "live",
     style: {
       fill: "#ffffff",
       stroke: "#2563eb",
@@ -47,6 +48,23 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
     },
     extent: null,
     updatedAt: "2026-06-17T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function createTilePackage(overrides: Partial<TilePackage> = {}): TilePackage {
+  return {
+    id: "pkg-1",
+    layerId: "layer-1",
+    version: 1,
+    minZoom: 0,
+    maxZoom: 12,
+    bounds: null,
+    format: "mvt",
+    sourceType: "directory",
+    storagePath: "layer-1/v1",
+    createdAt: "2026-06-18T00:00:00.000Z",
+    updatedAt: "2026-06-18T00:00:00.000Z",
     ...overrides
   };
 }
@@ -82,12 +100,17 @@ function createService(options: {
     updateFeature: vi.fn(),
     deleteFeature: vi.fn()
   };
+  const tileCacheService = {
+    findTilePackage: vi.fn(async () => layer.tilePackages?.[0]),
+    readPublishedTile: vi.fn(async (): Promise<Buffer | null> => null)
+  };
   const service = new LayersService(
     layersRepository as never,
     datasourcesRepository as never,
-    postgisRepository as never
+    postgisRepository as never,
+    tileCacheService as never
   );
-  return { service, layersRepository, postgisRepository };
+  return { service, layersRepository, postgisRepository, tileCacheService };
 }
 
 describe("LayersService tile version cache", () => {
@@ -100,6 +123,54 @@ describe("LayersService tile version cache", () => {
     expect(first.toString()).toBe("cached-tile");
     expect(second.toString()).toBe("cached-tile");
     expect(postgisRepository.getVectorTile).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads published directory tiles before falling back to live PostGIS MVT", async () => {
+    const tilePackage = createTilePackage();
+    const layer = createLayer({ tileSourceType: "directory", tilePackages: [tilePackage] });
+    const { service, postgisRepository, tileCacheService } = createService({ layer });
+    tileCacheService.readPublishedTile.mockResolvedValueOnce(Buffer.from("published-tile"));
+
+    const tile = await service.getVectorTile("layer-1", 8, 210, 97);
+
+    expect(tile.toString()).toBe("published-tile");
+    expect(tileCacheService.findTilePackage).toHaveBeenCalledWith(layer, 8);
+    expect(tileCacheService.readPublishedTile).toHaveBeenCalledWith(tilePackage, 8, 210, 97);
+    expect(postgisRepository.getVectorTile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to live PostGIS MVT when a published tile is missing", async () => {
+    const { service, postgisRepository, tileCacheService } = createService({
+      layer: createLayer({ tileSourceType: "directory" }),
+      tile: Buffer.from("live-tile")
+    });
+    tileCacheService.readPublishedTile.mockResolvedValueOnce(null);
+
+    const tile = await service.getVectorTile("layer-1", 8, 210, 97);
+
+    expect(tile.toString()).toBe("live-tile");
+    expect(postgisRepository.getVectorTile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse cached directory tiles across package versions", async () => {
+    const firstPackage = createTilePackage({ id: "pkg-1", version: 1 });
+    const secondPackage = createTilePackage({ id: "pkg-2", version: 2 });
+    const { service, tileCacheService } = createService({
+      layer: createLayer({ tileSourceType: "directory", tilePackages: [firstPackage] })
+    });
+    tileCacheService.findTilePackage
+      .mockResolvedValueOnce(firstPackage)
+      .mockResolvedValueOnce(secondPackage);
+    tileCacheService.readPublishedTile
+      .mockResolvedValueOnce(Buffer.from("offline-v1"))
+      .mockResolvedValueOnce(Buffer.from("offline-v2"));
+
+    const first = await service.getVectorTile("layer-1", 8, 210, 97);
+    const second = await service.getVectorTile("layer-1", 8, 210, 97);
+
+    expect(first.toString()).toBe("offline-v1");
+    expect(second.toString()).toBe("offline-v2");
+    expect(tileCacheService.readPublishedTile).toHaveBeenCalledTimes(2);
   });
 
   it("returns saved feature with bumped tileVersion and invalidates old tile cache", async () => {

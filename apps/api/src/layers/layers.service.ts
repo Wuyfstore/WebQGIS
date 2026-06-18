@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatasourcesRepository } from "../datasources/datasources.repository.js";
 import { PostgisRepository } from "../postgis/postgis.repository.js";
-import type { FeatureDeleteResult, FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, FeatureWriteResult, GeometryBbox, LayerRegistration, LayerStyle } from "../types.js";
+import { TileCacheService } from "../tile-cache/tile-cache.service.js";
+import type { FeatureDeleteResult, FeaturePageQuery, FeaturePayload, FeatureSelectionPayload, FeatureWriteResult, GeometryBbox, LayerRegistration, LayerStyle, TilePackage } from "../types.js";
 import { dirtyTilesForBbox, mergeBboxes } from "../tiles/dirty-tiles.js";
 import { AttributeCalculationDto } from "./dto/attribute-calculation.dto.js";
 import { LayerStyleDto } from "./dto/layer-style.dto.js";
@@ -18,7 +19,9 @@ export class LayersService {
     @Inject(DatasourcesRepository)
     private readonly datasourcesRepository: DatasourcesRepository,
     @Inject(PostgisRepository)
-    private readonly postgisRepository: PostgisRepository
+    private readonly postgisRepository: PostgisRepository,
+    @Inject(TileCacheService)
+    private readonly tileCacheService: TileCacheService
   ) {}
 
   list(): Promise<LayerRegistration[]> {
@@ -111,10 +114,16 @@ export class LayersService {
     const layer = await this.getRequiredLayer(layerId);
     const datasource = await this.getRequiredDatasource(layer.datasourceId);
     const tileVersion = layer.tileVersion ?? 1;
-    const cacheKey = this.tileCacheKey(layerId, z, x, y, tileVersion);
+    const tilePackage = await this.findPublishedTilePackage(layer, z);
+    const cacheKey = this.tileCacheKey(layerId, z, x, y, tileVersion, tilePackage);
     const cached = this.tileCache.get(cacheKey);
     if (cached) {
       return cached;
+    }
+    const publishedTile = await this.readPublishedTile(tilePackage, z, x, y);
+    if (publishedTile) {
+      this.tileCache.set(cacheKey, publishedTile);
+      return publishedTile;
     }
     const tile = await this.postgisRepository.getVectorTile(datasource, layer, z, x, y);
     this.tileCache.set(cacheKey, tile);
@@ -155,8 +164,23 @@ export class LayersService {
     }
   }
 
-  private tileCacheKey(layerId: string, z: number, x: number, y: number, tileVersion: number) {
-    return `${layerId}:${z}:${x}:${y}:${tileVersion}`;
+  private tileCacheKey(layerId: string, z: number, x: number, y: number, tileVersion: number, tilePackage?: TilePackage) {
+    const sourceVersion = tilePackage ? `${tilePackage.id}:${tilePackage.version}` : `live:${tileVersion}`;
+    return `${layerId}:${z}:${x}:${y}:${sourceVersion}`;
+  }
+
+  private async findPublishedTilePackage(layer: LayerRegistration, z: number) {
+    if (layer.tileSourceType === "live" || layer.tileSourceType === "cached" || !layer.tileSourceType) {
+      return undefined;
+    }
+    return this.tileCacheService.findTilePackage(layer, z);
+  }
+
+  private async readPublishedTile(tilePackage: TilePackage | undefined, z: number, x: number, y: number) {
+    if (!tilePackage) {
+      return null;
+    }
+    return this.tileCacheService.readPublishedTile(tilePackage, z, x, y);
   }
 
   private dirtyTilesForMutation(oldBbox: GeometryBbox | null, newBbox: GeometryBbox | null) {

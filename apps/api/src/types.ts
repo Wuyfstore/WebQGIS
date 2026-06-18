@@ -52,6 +52,22 @@ export type LayerScaleSource = {
   idColumn?: string | null;
 };
 
+export type TileSourceType = "live" | "cached" | "directory" | "pmtiles" | "mbtiles";
+
+export type TilePackage = {
+  id: string;
+  layerId: string;
+  version: number;
+  minZoom: number;
+  maxZoom: number;
+  bounds: [number, number, number, number] | null;
+  format: "mvt";
+  sourceType: Exclude<TileSourceType, "live" | "cached">;
+  storagePath: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type LayerRegistration = {
   id: string;
   datasourceId: string;
@@ -72,6 +88,8 @@ export type LayerRegistration = {
   editableReason: string[];
   tileUrl: string;
   tileVersion: number;
+  tileSourceType?: TileSourceType;
+  tilePackages?: TilePackage[];
   scaleSources?: LayerScaleSource[];
   style: LayerStyle;
   extent: [number, number, number, number] | null;

@@ -62,4 +62,32 @@ describe("layer simplification scripts", () => {
       expect.objectContaining({ minZoom: 7, maxZoom: 10, table: "china_2025_province_simplified_z7_10" })
     ]);
   });
+
+  it("prints a dry-run tile publication plan", () => {
+    const output = execFileSync("node", [
+      path.join(rootDir, "scripts/generate-tiles.mjs"),
+      "--layer-id",
+      "province",
+      "--bounds",
+      "100,20,110,30",
+      "--min-zoom",
+      "3",
+      "--max-zoom",
+      "3",
+      "--output-dir",
+      "apps/api/data/tile-packages/province/z3_3"
+    ], { cwd: rootDir, encoding: "utf8" });
+
+    const parsed = JSON.parse(output) as {
+      mode: string;
+      layerId: string;
+      tileCount: number;
+      sample: Array<{ url: string; outputPath: string }>;
+    };
+    expect(parsed.mode).toBe("dry-run");
+    expect(parsed.layerId).toBe("province");
+    expect(parsed.tileCount).toBeGreaterThan(0);
+    expect(parsed.sample[0].url).toContain("/api/layers/province/tile/");
+    expect(parsed.sample[0].outputPath).toContain("apps");
+  });
 });

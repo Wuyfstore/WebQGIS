@@ -36,6 +36,7 @@ function createLayer(overrides: Partial<LayerRegistration> = {}): LayerRegistrat
     editableReason: [],
     tileUrl: "/api/layers/layer-1/tile/{z}/{x}/{y}.mvt",
     tileVersion: 1,
+    tileSourceType: "live",
     style: {
       fill: "#6EA8FE55",
       stroke: "#1D4ED8",
@@ -111,6 +112,29 @@ describe("LayersRepository", () => {
     expect(next.find((layer) => layer.id === "layer-1")?.scaleSources).toEqual(scaleSources);
   });
 
+  it("preserves offline tile settings when replacing scanned layers for a datasource", async () => {
+    const tilePackages = [{
+      id: "pkg-1",
+      layerId: "layer-1",
+      version: 3,
+      minZoom: 0,
+      maxZoom: 8,
+      bounds: null,
+      format: "mvt" as const,
+      sourceType: "directory" as const,
+      storagePath: "layer-1/v3",
+      createdAt: "2026-06-18T00:00:00.000Z",
+      updatedAt: "2026-06-18T00:00:00.000Z"
+    }];
+    await store.write("layers.json", [createLayer({ tileSourceType: "directory", tilePackages })]);
+
+    const next = await repository.replaceForDatasource("source-1", [createLayer()]);
+    const layer = next.find((item) => item.id === "layer-1");
+
+    expect(layer?.tileSourceType).toBe("directory");
+    expect(layer?.tilePackages).toEqual(tilePackages);
+  });
+
   it("updates layer style and timestamp", async () => {
     await store.write("layers.json", [createLayer()]);
 
@@ -148,5 +172,6 @@ describe("LayersRepository", () => {
     await store.write("layers.json", [legacyLayer]);
 
     expect((await repository.findById("layer-1"))?.tileVersion).toBe(1);
+    expect((await repository.findById("layer-1"))?.tileSourceType).toBe("live");
   });
 });
