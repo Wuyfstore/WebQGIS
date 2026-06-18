@@ -1,3 +1,4 @@
+import { ConflictException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import type { DatasourceConfig, LayerRegistration, TilePackage } from "../types.js";
 import { LayersService } from "./layers.service.js";
@@ -213,6 +214,18 @@ describe("LayersService tile version cache", () => {
     expect(result.tileVersion).toBe(5);
     expect(result.dirtyTiles.length).toBeGreaterThan(0);
     expect(layersRepository.bumpTileVersion).toHaveBeenCalledWith("layer-1");
+  });
+
+  it("does not bump tileVersion when an update hits an edit conflict", async () => {
+    const { service, layersRepository, postgisRepository } = createService({ bumpedVersion: 5 });
+    postgisRepository.updateFeature.mockRejectedValueOnce(new ConflictException("Feature has changed on the server"));
+
+    await expect(service.updateFeature("layer-1", "7", {
+      geometry: { type: "Point", coordinates: [105, 31] },
+      revision: "stale"
+    })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(layersRepository.bumpTileVersion).not.toHaveBeenCalled();
   });
 
   it("bumps tileVersion after deleting a feature", async () => {

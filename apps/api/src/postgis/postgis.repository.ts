@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, OnApplicationShutdown } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnApplicationShutdown } from "@nestjs/common";
 import { Pool } from "pg";
 import type {
   DatasourceConfig,
@@ -263,7 +263,8 @@ export class PostgisRepository implements OnApplicationShutdown {
         'type', 'Feature',
         'id', ${this.featureIdSql(layer)},
         'geometry', ST_AsGeoJSON(ST_Transform(${this.geometrySql(layer)}, 4326))::jsonb,
-        'properties', to_jsonb(t) - $1 - coalesce($2, '')
+        'properties', to_jsonb(t) - $1 - coalesce($2, ''),
+        'revision', t.xmin::text
       ) as feature
       from ${qualifiedTable(layer)} t
       where ${idPredicate}
@@ -522,17 +523,27 @@ export class PostgisRepository implements OnApplicationShutdown {
     }
     values.push(pk);
     const idPredicate = this.buildFeatureIdPredicate(layer, values.length);
+    const revisionPredicate = payload.revision ? ` and t.xmin::text = $${values.length + 1}` : "";
+    if (payload.revision) {
+      values.push(payload.revision);
+    }
     const pool = this.getPool(config);
     const result = await pool.query<{ id: string }>(
       `
-      update ${qualifiedTable(layer)}
+      update ${qualifiedTable(layer)} t
       set ${setParts.join(", ")}
-      where ${idPredicate}
+      where ${idPredicate}${revisionPredicate}
       returning ${this.featureIdSql(layer, false)} as id
       `,
       values
     );
-    const nextId = result.rows[0]?.id ?? pk;
+    const nextId = result.rows[0]?.id;
+    if (!nextId) {
+      if (oldFeature && payload.revision) {
+        throw new ConflictException("Feature has changed on the server. Reload it before saving again.");
+      }
+      throw new NotFoundException("Feature not found");
+    }
     const feature = await this.readFeature(config, layer, String(nextId));
     if (!feature) {
       throw new NotFoundException("Feature not found");

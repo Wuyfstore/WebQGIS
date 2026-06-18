@@ -1,3 +1,4 @@
+import { ConflictException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 import type { DatasourceConfig, LayerRegistration } from "../types.js";
 import { geometryBbox, PostgisRepository } from "./postgis.repository.js";
@@ -308,5 +309,102 @@ describe("PostgisRepository ctid-backed layers", () => {
 
     expect(queries[0]).toContain('"public"."roads"');
     expect(queries[0]).not.toContain("roads_simplified_z0_6");
+  });
+
+  it("adds an xmin revision token when reading editable features", async () => {
+    const queries: string[] = [];
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return {
+          rows: [{
+            feature: {
+              type: "Feature",
+              id: "7",
+              geometry: { type: "Point", coordinates: [104, 30] },
+              properties: { name: "road-7" },
+              revision: "123"
+            }
+          }]
+        };
+      }
+    });
+
+    const feature = await repository.readFeature(createDatasource(), createLayer({ primaryKey: "id" }), "7");
+
+    expect(feature?.revision).toBe("123");
+    expect(queries[0]).toContain("'revision', t.xmin::text");
+  });
+
+  it("checks xmin revision when updating a feature", async () => {
+    const queries: string[] = [];
+    const values: unknown[][] = [];
+    let readCount = 0;
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string, queryValues: unknown[] = []) => {
+        queries.push(sql);
+        values.push(queryValues);
+        if (sql.includes("update")) {
+          return { rows: [{ id: "7" }] };
+        }
+        readCount += 1;
+        return {
+          rows: [{
+            feature: {
+              type: "Feature",
+              id: "7",
+              geometry: { type: "Point", coordinates: [104 + readCount, 30] },
+              properties: { name: "road-7" },
+              revision: String(100 + readCount)
+            }
+          }]
+        };
+      }
+    });
+
+    await repository.updateFeature(createDatasource(), createLayer({ primaryKey: "id" }), "7", {
+      geometry: { type: "Point", coordinates: [105, 30] },
+      properties: { name: "updated-road" },
+      revision: "101"
+    });
+
+    const updateQuery = queries.find((query) => query.includes("update"));
+    const updateValues = values[queries.findIndex((query) => query.includes("update"))];
+    expect(updateQuery).toContain("t.xmin::text = $4");
+    expect(updateValues).toEqual([
+      "updated-road",
+      JSON.stringify({ type: "Point", coordinates: [105, 30] }),
+      "7",
+      "101"
+    ]);
+  });
+
+  it("throws 409 when updating with a stale revision", async () => {
+    const repository = new PostgisRepository();
+    (repository as unknown as { getPool: () => unknown }).getPool = () => ({
+      query: async (sql: string) => {
+        if (sql.includes("update")) {
+          return { rows: [] };
+        }
+        return {
+          rows: [{
+            feature: {
+              type: "Feature",
+              id: "7",
+              geometry: { type: "Point", coordinates: [104, 30] },
+              properties: { name: "road-7" },
+              revision: "102"
+            }
+          }]
+        };
+      }
+    });
+
+    await expect(repository.updateFeature(createDatasource(), createLayer({ primaryKey: "id" }), "7", {
+      geometry: { type: "Point", coordinates: [105, 30] },
+      revision: "101"
+    })).rejects.toBeInstanceOf(ConflictException);
   });
 });

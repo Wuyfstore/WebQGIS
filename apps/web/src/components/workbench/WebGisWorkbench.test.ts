@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shallowRef } from "vue";
 import WebGisWorkbench from "./WebGisWorkbench.vue";
 import DatasourcePanel from "./DatasourcePanel.vue";
-import { apiGet, apiSend } from "../../api";
+import { ApiError, apiGet, apiSend } from "../../api";
 import type { CrsDefinition, Datasource, DatasourceForm, LayerRegistration } from "../../types/gis";
 
 const sampleDatasources: Datasource[] = [
@@ -217,8 +217,10 @@ let editorOptions: {
   layers: { value: LayerRegistration[] };
   selectedFeatureId: { value: string | null };
   draftGeometry: { value: unknown };
+  readFeature: (layerId: string, pk: string) => Promise<unknown>;
   markDraftDirty?: () => void;
 } | null = null;
+let forceFeatureConflict = false;
 
 vi.mock("../../composables/useOpenLayersEditor", () => ({
   useOpenLayersEditor: (options: typeof editorOptions) => {
@@ -228,6 +230,12 @@ vi.mock("../../composables/useOpenLayersEditor", () => ({
 }));
 
 vi.mock("../../api", () => ({
+  ApiError: class ApiError extends Error {
+    constructor(message: string, readonly status: number) {
+      super(message);
+      this.name = "ApiError";
+    }
+  },
   apiGet: vi.fn(async (path: string) => {
     if (path === "/api/datasources") {
       return sampleDatasources;
@@ -248,7 +256,16 @@ vi.mock("../../api", () => ({
     if (path === "/api/crs/custom") {
       return [customCrs];
     }
-    if (path.startsWith("/api/layers/city/features")) {
+    if (path === "/api/layers/city/features/2048") {
+      return {
+        type: "Feature" as const,
+        id: 2048,
+        geometry: { type: "Point", coordinates: [104, 30] },
+        properties: { id: 2048, name: "成都市", adcode: 510100 },
+        revision: "101"
+      };
+    }
+    if (path.startsWith("/api/layers/city/features?")) {
       const url = new URL(path, "http://localhost");
       const search = url.searchParams.get("search") ?? "";
       const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -290,6 +307,9 @@ vi.mock("../../api", () => ({
       };
     }
     if (path === "/api/layers/city/features/2048" && method === "PUT") {
+      if (forceFeatureConflict) {
+        throw new ApiError("Feature has changed on the server. Reload it before saving again.", 409);
+      }
       return {
         feature: {
           type: "Feature" as const,
@@ -299,7 +319,8 @@ vi.mock("../../api", () => ({
             id: 2048,
             name: "服务端确认名称",
             adcode: 510104
-          }
+          },
+          revision: "102"
         },
         tileVersion: 2,
         dirtyTiles: [{ z: 12, x: 3234, y: 1692 }]
@@ -450,6 +471,7 @@ function setNativeInputValue(element: HTMLInputElement | HTMLTextAreaElement | H
 describe("WebGisWorkbench", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    forceFeatureConflict = false;
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn(async () => undefined)
@@ -924,7 +946,7 @@ describe("WebGisWorkbench", () => {
     await editTool?.trigger("click");
     await flushPromises();
     expect(editorOptions).not.toBeNull();
-    editorOptions!.selectedFeatureId.value = "2048";
+    await editorOptions!.readFeature("city", "2048");
     editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
     editorOptions!.markDraftDirty?.();
     await flushPromises();
@@ -945,14 +967,64 @@ describe("WebGisWorkbench", () => {
         id: 2048,
         name: "服务端确认名称",
         adcode: 510104
-      }
+      },
+      revision: "102"
     };
     expect(editorMock.loadEditableFeature).toHaveBeenCalledWith(savedFeature);
+    expect(apiSend).toHaveBeenCalledWith("/api/layers/city/features/2048", "PUT", {
+      geometry: { type: "Point", coordinates: [104, 30] },
+      properties: { id: 2048, name: "成都市", adcode: 510100 },
+      revision: "101"
+    });
     expect(editorMock.markFeatureCovered).toHaveBeenCalledWith("city", 2048);
     expect(editorMock.refreshLayer).toHaveBeenCalledWith("city");
     expect(editorOptions!.layers.value.find((layer) => layer.id === "city")?.tileVersion).toBe(2);
     expect(editorOptions!.draftGeometry.value).toEqual({ type: "Point", coordinates: [105, 31] });
+    expect(wrapper.text()).toContain("版本 102");
     expect(wrapper.find<HTMLInputElement>(".edit-inspector__input").element.value).toBe("服务端确认名称");
+  });
+
+  it("shows an edit conflict and reloads the server feature version", async () => {
+    const wrapper = mount(WebGisWorkbench);
+    await flushPromises();
+    await loadLayerByDoubleClick(wrapper);
+    const editTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "开启当前图层编辑");
+    await editTool?.trigger("click");
+    await flushPromises();
+    expect(editorOptions).not.toBeNull();
+    await editorOptions!.readFeature("city", "2048");
+    editorOptions!.draftGeometry.value = { type: "Point", coordinates: [104, 30] };
+    editorOptions!.markDraftDirty?.();
+    await flushPromises();
+    forceFeatureConflict = true;
+    editorMock.loadEditableFeature.mockClear();
+    editorMock.markFeatureCovered.mockClear();
+
+    const saveTool = wrapper.findAll(".workbench__tool")
+      .find((tool) => tool.attributes("title") === "保存当前编辑");
+    await saveTool?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("编辑冲突");
+    expect(wrapper.text()).toContain("重新加载服务端版本");
+    expect(editorMock.loadEditableFeature).not.toHaveBeenCalled();
+    expect(editorMock.markFeatureCovered).not.toHaveBeenCalled();
+
+    const reloadButton = wrapper.find(".edit-inspector__conflict-button");
+    await reloadButton.trigger("click");
+    await flushPromises();
+
+    expect(apiGet).toHaveBeenCalledWith("/api/layers/city/features/2048");
+    expect(editorMock.loadEditableFeature).toHaveBeenCalledWith({
+      type: "Feature",
+      id: 2048,
+      geometry: { type: "Point", coordinates: [104, 30] },
+      properties: { id: 2048, name: "成都市", adcode: 510100 },
+      revision: "101"
+    });
+    expect(wrapper.text()).toContain("版本 101");
+    expect(wrapper.text()).toContain("已重新加载服务端版本：要素 2048");
   });
 
   it("does not cover MVT features when save fails", async () => {

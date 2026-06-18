@@ -106,7 +106,9 @@ const {
   busy,
   status,
   selectedFeatureId,
+  selectedFeatureRevision,
   selectedProperties,
+  featureConflict,
   hasUnsavedEditDraft,
   datasourceForm,
   editableFields,
@@ -640,6 +642,13 @@ function handleClearDraft() {
   editor.clearDraft();
 }
 
+async function handleReloadConflictedFeature() {
+  const feature = await workspace.reloadConflictedFeature();
+  if (feature) {
+    editor.loadEditableFeature(feature);
+  }
+}
+
 function clearSelectionVisuals() {
   editor.clearSelectionFeatures();
   workspace.clearSelectedFeatureState();
@@ -1106,7 +1115,10 @@ function validateActiveLayer() {
         :is-editing-layer="isEditingActiveLayer"
         :selected-layer-status="selectedLayerStatus"
         :selected-feature-id="selectedFeatureId"
+        :selected-feature-revision="selectedFeatureRevision"
+        :conflict-message="featureConflict?.message"
         @property-change="handlePropertyChange"
+        @reload-conflict="handleReloadConflictedFeature"
       />
     </section>
 

@@ -1,4 +1,4 @@
-import { IsObject, IsOptional } from "class-validator";
+import { IsObject, IsOptional, IsString } from "class-validator";
 
 export class FeaturePayloadDto {
   @IsOptional()
@@ -7,4 +7,8 @@ export class FeaturePayloadDto {
   @IsOptional()
   @IsObject()
   properties?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  revision?: string;
 }

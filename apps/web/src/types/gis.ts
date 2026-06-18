@@ -5,6 +5,7 @@ export type GeoJsonFeature = {
   id?: string | number | null;
   geometry: unknown;
   properties?: Record<string, unknown> | null;
+  revision?: string | null;
 };
 
 export type DirtyTile = {
@@ -199,6 +200,12 @@ export type FeatureWriteResult = {
   feature: GeoJsonFeature;
   tileVersion: number;
   dirtyTiles: DirtyTile[];
+};
+
+export type FeatureConflictState = {
+  layerId: string;
+  featureId: string;
+  message: string;
 };
 
 export type FeatureDeleteResult = {

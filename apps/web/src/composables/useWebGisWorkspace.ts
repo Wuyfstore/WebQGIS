@@ -1,6 +1,6 @@
 import { computed, reactive, shallowRef } from "vue";
 import { useTitle } from "@vueuse/core";
-import { apiGet, apiSend } from "../api";
+import { ApiError, apiGet, apiSend } from "../api";
 import { getEditableFields, getLayerStatus, isPostgisLayer } from "../utils/layer";
 import type {
   Datasource,
@@ -12,6 +12,7 @@ import type {
   CrsDefinition,
   CustomCrsPayload,
   FeatureDeleteResult,
+  FeatureConflictState,
   FeaturePage,
   FeatureSelectionResult,
   FeatureSummary,
@@ -63,9 +64,11 @@ export function useWebGisWorkspace() {
   const busy = shallowRef(false);
   const status = shallowRef<StatusMessage>({ text: "就绪", tone: "neutral" });
   const selectedFeatureId = shallowRef<string | null>(null);
+  const selectedFeatureRevision = shallowRef<string | null>(null);
   const selectedProperties = shallowRef<Record<string, unknown>>({});
   const draftGeometry = shallowRef<unknown>(null);
   const isDraftDirty = shallowRef(false);
+  const featureConflict = shallowRef<FeatureConflictState | null>(null);
   const lastDirtyTiles = shallowRef<DirtyTile[]>([]);
   const displayProjection = shallowRef("EPSG:3857");
   const crsCatalog = shallowRef<CrsDefinition[]>([]);
@@ -127,20 +130,26 @@ export function useWebGisWorkspace() {
 
   function setSelectedFeature(feature: GeoJsonFeature, fallbackId?: string) {
     selectedFeatureId.value = String(feature.id ?? fallbackId ?? "");
+    selectedFeatureRevision.value = feature.revision ? String(feature.revision) : null;
     selectedProperties.value = { ...(feature.properties ?? {}) };
     isDraftDirty.value = false;
+    featureConflict.value = null;
   }
 
   function clearDraftState() {
     selectedFeatureId.value = null;
+    selectedFeatureRevision.value = null;
     selectedProperties.value = {};
     draftGeometry.value = null;
     isDraftDirty.value = false;
+    featureConflict.value = null;
   }
 
   function clearSelectedFeatureState() {
     selectedFeatureId.value = null;
+    selectedFeatureRevision.value = null;
     selectedProperties.value = {};
+    featureConflict.value = null;
   }
 
   function markDraftDirty() {
@@ -527,13 +536,29 @@ export function useWebGisWorkspace() {
       return undefined;
     }
     return withBusy(async () => {
+      const revision = selectedFeatureRevision.value ?? undefined;
       const payload = {
         geometry: draftGeometry.value,
-        properties: selectedProperties.value
+        properties: selectedProperties.value,
+        revision
       };
-      const result = selectedFeatureId.value
-        ? await apiSend<GeoJsonFeature | FeatureWriteResult>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "PUT", payload)
-        : await apiSend<GeoJsonFeature | FeatureWriteResult>(`/api/layers/${layer.id}/features`, "POST", payload);
+      let result: GeoJsonFeature | FeatureWriteResult;
+      try {
+        result = selectedFeatureId.value
+          ? await apiSend<GeoJsonFeature | FeatureWriteResult>(`/api/layers/${layer.id}/features/${selectedFeatureId.value}`, "PUT", payload)
+          : await apiSend<GeoJsonFeature | FeatureWriteResult>(`/api/layers/${layer.id}/features`, "POST", payload);
+      } catch (error) {
+        if (isApiConflict(error) && selectedFeatureId.value) {
+          featureConflict.value = {
+            layerId: layer.id,
+            featureId: selectedFeatureId.value,
+            message: readErrorMessage(error)
+          };
+          setStatus("保存冲突：服务端要素已被其他人修改，请重新加载服务端版本后再编辑", "danger");
+          return undefined;
+        }
+        throw error;
+      }
       const saved = normalizeFeatureWriteResult(result);
       if ("tileVersion" in result) {
         applyLayerTileVersion(layer.id, result.tileVersion);
@@ -545,6 +570,21 @@ export function useWebGisWorkspace() {
       setStatus(`保存成功：要素 ${saved.id ?? selectedFeatureId.value ?? "已写入"} 已写入 PostGIS，图层已自动刷新`, "success");
       return saved;
     });
+  }
+
+  async function reloadConflictedFeature() {
+    const conflict = featureConflict.value;
+    if (!conflict) {
+      setStatus("当前没有待处理的编辑冲突", "warning");
+      return undefined;
+    }
+    const feature = await readFeature(conflict.layerId, conflict.featureId);
+    if (feature) {
+      draftGeometry.value = feature.geometry;
+      markDraftClean();
+      setStatus(`已重新加载服务端版本：要素 ${conflict.featureId}`, "success");
+    }
+    return feature;
   }
 
   async function deleteSelectedFeature() {
@@ -608,9 +648,11 @@ export function useWebGisWorkspace() {
     busy,
     status,
     selectedFeatureId,
+    selectedFeatureRevision,
     selectedProperties,
     draftGeometry,
     isDraftDirty,
+    featureConflict,
     lastDirtyTiles,
     hasUnsavedEditDraft,
     datasourceForm,
@@ -642,6 +684,7 @@ export function useWebGisWorkspace() {
     calculateLayerAttribute,
     closeAttributeTable,
     saveFeature,
+    reloadConflictedFeature,
     deleteSelectedFeature,
     updateLayerStyle,
     saveWebServiceConnection,
@@ -657,6 +700,16 @@ export function useWebGisWorkspace() {
 
 function normalizeFeatureWriteResult(result: GeoJsonFeature | FeatureWriteResult): GeoJsonFeature {
   return "feature" in result ? result.feature : result;
+}
+
+function isApiConflict(error: unknown) {
+  return error instanceof ApiError
+    ? error.status === 409
+    : typeof error === "object" && error !== null && "status" in error && (error as { status?: unknown }).status === 409;
+}
+
+function readErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Feature has changed on the server. Reload it before saving again.";
 }
 
 function readDirtyTiles(result: unknown) {

@@ -9,10 +9,13 @@ const props = defineProps<{
   isEditingLayer: boolean;
   selectedLayerStatus: string;
   selectedFeatureId: string | null;
+  selectedFeatureRevision: string | null;
+  conflictMessage?: string;
 }>();
 
 const emit = defineEmits<{
   propertyChange: [];
+  reloadConflict: [];
 }>();
 
 const selectedProperties = defineModel<Record<string, unknown>>("selectedProperties", { required: true });
@@ -41,6 +44,7 @@ const layerGeometrySummary = computed(() => {
           <span class="edit-inspector__badge edit-inspector__badge--primary">{{ selectedLayerStatus }}</span>
           <span class="edit-inspector__badge">{{ activeLayer?.hasSpatialIndex ? "空间索引" : "无空间索引" }}</span>
           <span class="edit-inspector__badge">要素 {{ selectedFeatureId ?? "未选择" }}</span>
+          <span class="edit-inspector__badge">版本 {{ selectedFeatureRevision ?? "未读取" }}</span>
         </div>
       </div>
     </section>
@@ -74,8 +78,16 @@ const layerGeometrySummary = computed(() => {
         <li v-if="!isEditingLayer" class="edit-inspector__check edit-inspector__check--warn">当前图层未开启编辑</li>
         <li class="edit-inspector__check edit-inspector__check--ok">SRID 可转换到地图坐标系</li>
         <li class="edit-inspector__check edit-inspector__check--ok">几何类型符合 {{ activeLayer?.geometryType ?? "当前图层" }}</li>
-        <li class="edit-inspector__check edit-inspector__check--warn">未检测到 version 字段，保存可能覆盖</li>
+        <li v-if="selectedFeatureRevision" class="edit-inspector__check edit-inspector__check--ok">保存时会校验服务端版本</li>
+        <li v-else class="edit-inspector__check edit-inspector__check--warn">新要素保存后会获取服务端版本</li>
       </ul>
+      <div v-if="conflictMessage" class="edit-inspector__conflict" role="alert">
+        <strong class="edit-inspector__conflict-title">编辑冲突</strong>
+        <p class="edit-inspector__conflict-message">{{ conflictMessage }}</p>
+        <button class="edit-inspector__conflict-button focus-ring" type="button" @click="emit('reloadConflict')">
+          重新加载服务端版本
+        </button>
+      </div>
     </section>
 
     <section class="edit-inspector__panel workbench-panel">
@@ -207,6 +219,34 @@ WHERE {{ activeLayer?.primaryKey ?? "id" }} = {{ selectedFeatureId ?? "?" }};</p
 
 .edit-inspector__check--warn {
   color: var(--qgis-warn);
+}
+
+.edit-inspector__conflict {
+  margin: 0 12px 12px;
+  border: 1px solid #d97706;
+  background: #fff7ed;
+  padding: 10px;
+  color: #7c2d12;
+  font-size: 12px;
+}
+
+.edit-inspector__conflict-title {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.edit-inspector__conflict-message {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.edit-inspector__conflict-button {
+  min-height: 26px;
+  border: 1px solid #c2410c;
+  background: #fed7aa;
+  padding: 3px 10px;
+  color: #7c2d12;
+  font-size: 12px;
 }
 
 .edit-inspector__sql {

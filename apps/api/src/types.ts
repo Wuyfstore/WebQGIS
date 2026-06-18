@@ -101,6 +101,7 @@ export type GeoJsonFeature = {
   id?: string | number | null;
   geometry: unknown;
   properties?: Record<string, unknown> | null;
+  revision?: string | null;
 };
 
 export type GeometryBbox = [number, number, number, number];
@@ -114,6 +115,7 @@ export type DirtyTile = {
 export type FeaturePayload = {
   geometry?: unknown;
   properties?: Record<string, unknown>;
+  revision?: string | null;
 };
 
 export type FeatureWriteResult = {
